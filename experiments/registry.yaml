@@ -1,0 +1,3 @@
+# Registry shape placeholder only. Experiment execution is intentionally unavailable in Phase 0.
+schema_version: 1
+experiments: []

@@ -1,0 +1,15 @@
+schema_version: 1
+run:
+  root: artifacts/runs
+  seed: 20260728
+  max_steps: 4
+  task_id: phase0-fixture
+  split: training
+proposer:
+  id: mock
+  batch_size: 1
+oracle:
+  id: mock-v1
+logging:
+  level: INFO
+

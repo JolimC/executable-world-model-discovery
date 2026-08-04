@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "world-model-search"
+version = "0.1.0"
+description = "Oracle-grounded executable world-model discovery research shell"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [{ name = "World Model Search contributors" }]
+dependencies = [
+  "PyYAML==6.0.2",
+]
+
+[project.scripts]
+wms = "world_model_search.cli:main"
+
+[dependency-groups]
+dev = [
+  "mypy==1.17.1",
+  "pytest==8.4.1",
+  "ruff==0.12.7",
+  "types-PyYAML==6.0.12.20250516",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/world_model_search"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers -ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["world_model_search"]
+mypy_path = "src"
+

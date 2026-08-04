@@ -1,0 +1,16 @@
+# Phase 0 placeholder. The benchmark command validates this file, then reports
+# that experiment execution begins in a later phase.
+schema_version: 1
+run:
+  root: artifacts/runs
+  seed: 20260730
+  max_steps: 4
+  task_id: phase0-benchmark-fixture
+  split: validation
+proposer:
+  id: mock
+  batch_size: 1
+oracle:
+  id: mock-v1
+logging:
+  level: INFO

@@ -1,0 +1,16 @@
+# Phase 0 placeholder. It intentionally remains mock-only until later phases.
+schema_version: 1
+run:
+  root: artifacts/runs
+  seed: 20260729
+  max_steps: 8
+  task_id: phase0-pilot-fixture
+  split: development
+proposer:
+  id: mock
+  batch_size: 1
+oracle:
+  id: mock-v1
+logging:
+  level: INFO
+

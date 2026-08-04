@@ -1,1 +1,10 @@
 /local_instructions/
+/local_notes/
+/.codex/
+/.venv/
+/.mypy_cache/
+/.pytest_cache/
+/.ruff_cache/
+/artifacts/
+__pycache__/
+*.py[cod]
