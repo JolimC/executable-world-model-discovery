@@ -34,11 +34,21 @@ class PublicDemonstration:
 
 
 @dataclass(frozen=True, slots=True)
+class PublicWorldSpec:
+    """Minimal mechanics needed to interpret a task, without generator-family hints."""
+
+    specification_version: str
+    observation_type: str
+    successor_type: str
+    candidate_type: str
+
+
+@dataclass(frozen=True, slots=True)
 class PublicTask:
     """The only task representation authorized for proposer context."""
 
     task_id: str
-    family: str
+    public_world_spec: PublicWorldSpec
     split: SplitLabel
     demonstrations: tuple[PublicDemonstration, ...]
     active_queries_enabled: bool
@@ -50,7 +60,8 @@ class Task:
     """Internal task contract, including oracle-only artifact references."""
 
     task_id: str
-    family: str
+    internal_family_id: str
+    public_world_spec: PublicWorldSpec
     split: SplitLabel
     public_demonstrations: tuple[PublicDemonstration, ...]
     active_queries_enabled: bool
@@ -67,7 +78,7 @@ class Task:
 
         return PublicTask(
             task_id=self.task_id,
-            family=self.family,
+            public_world_spec=self.public_world_spec,
             split=self.split,
             demonstrations=self.public_demonstrations,
             active_queries_enabled=self.active_queries_enabled,

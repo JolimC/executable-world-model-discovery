@@ -51,7 +51,8 @@ class RunDatabase:
         );
         CREATE TABLE task (
             task_id TEXT PRIMARY KEY,
-            family TEXT NOT NULL,
+            internal_family_id TEXT NOT NULL,
+            public_world_spec_json TEXT NOT NULL,
             split TEXT NOT NULL,
             public_artifact_hash TEXT NOT NULL,
             hidden_artifact_id TEXT NOT NULL,
@@ -94,12 +95,13 @@ class RunDatabase:
             )
             self.connection.execute(
                 """INSERT INTO task (
-                    task_id, family, split, public_artifact_hash, hidden_artifact_id,
-                    generator_version, seed
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    task_id, internal_family_id, public_world_spec_json, split,
+                    public_artifact_hash, hidden_artifact_id, generator_version, seed
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     task.task_id,
-                    task.family,
+                    task.internal_family_id,
+                    canonical_json(task.public_world_spec),
                     task.split.value,
                     task.public_artifact_hash,
                     task.hidden_artifact_id,

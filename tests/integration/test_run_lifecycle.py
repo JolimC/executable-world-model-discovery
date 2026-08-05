@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from pytest import MonkeyPatch
@@ -24,6 +25,11 @@ def test_run_can_interrupt_resume_and_replay_deterministically(
     assert interrupted.status == "interrupted"
     assert interrupted.completed_steps == 2
     assert not (interrupted.run_directory / "results.json").exists()
+    manifest = json.loads((interrupted.run_directory / "manifest.json").read_text(encoding="utf-8"))
+    task_manifest = manifest["tasks"][0]
+    assert task_manifest["internal_family_id"] == "phase0-no-ca-fixture"
+    assert task_manifest["public_world_spec"]["candidate_type"] == "phase0-rule-expr-stub-v1"
+    assert "family" not in task_manifest
     with RunDatabase(interrupted.run_directory / "run.sqlite3", read_only=True) as database:
         assert database.state().status == "interrupted"
 

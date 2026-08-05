@@ -32,6 +32,8 @@ def test_proposal_context_structurally_excludes_oracle_only_task_fields(
     context = ProposalContext(task=task.public_view())
     context_fields = {field.name for field in fields(context.task)}
     forbidden_fields = {
+        "family",
+        "internal_family_id",
         "seed",
         "hidden_artifact_id",
         "exact_case_set_id",
@@ -42,5 +44,18 @@ def test_proposal_context_structurally_excludes_oracle_only_task_fields(
     encoded = canonical_json(context)
     assert task.hidden_artifact_id not in encoded
     assert task.exact_case_set_id not in encoded
+    assert task.internal_family_id not in encoded
     assert str(task.seed) not in encoded
     assert str(app_config.run.seed) not in encoded
+
+
+def test_public_world_spec_contains_mechanics_not_internal_family(
+    app_config: AppConfig,
+) -> None:
+    task = make_fixture_task(app_config)
+    public_task = task.public_view()
+    assert public_task.public_world_spec == task.public_world_spec
+    assert public_task.public_world_spec.observation_type == "opaque-string-v1"
+    assert public_task.public_world_spec.candidate_type == "phase0-rule-expr-stub-v1"
+    assert task.internal_family_id == "phase0-no-ca-fixture"
+    assert "family" not in canonical_json(public_task)

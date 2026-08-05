@@ -6,12 +6,15 @@ introduced.
 
 ## Trust boundary and typed flow
 
-An internal frozen `Task` contains public demonstrations plus oracle-only identifiers and the task seed.
-The proposer can receive only a frozen `ProposalContext`, whose `PublicTask` structurally omits the
-seed, hidden artifact identifier, exact case-set identifier, rollout suite identifier, and public artifact
-content hash. The context has no filesystem or database handle. Phase 0's `MockProposer` receives a
-domain-separated proposer RNG seed through `ProposalBudget`; that seed controls proposal generation,
-differs from the internal task seed, and is not oracle data. There are no model calls.
+An internal frozen `Task` contains an `internal_family_id`, public demonstrations, oracle-only
+identifiers, and the task seed. The proposer can receive only a frozen `ProposalContext`. Its
+`PublicTask` replaces the internal family with a structured `PublicWorldSpec` containing only the
+mechanics needed to interpret observations, successors, and candidate payloads. It structurally omits
+the fine-grained internal family, seed, hidden artifact identifier, exact case-set identifier, rollout
+suite identifier, and public artifact content hash. The context has no filesystem or database handle.
+Phase 0's `MockProposer` receives a domain-separated proposer RNG seed through `ProposalBudget`; that
+seed controls proposal generation, differs from the internal task seed, and is not oracle data. There
+are no model calls.
 
 The mock proposer emits an opaque typed `RuleExpr` fixture. This is deliberately not the real DSL. The
 runner attaches deterministic candidate identity and lineage fields, stores the canonical proposer output
@@ -20,9 +23,9 @@ CA behavior; it returns the `OracleResult` shape required by the future exact or
 runtime as diagnostic data.
 
 ```text
-validated YAML -> immutable manifest -> PublicTask -> MockProposer
-                                             |              |
-                                      context hash     proposal artifact
+validated YAML -> immutable manifest -> PublicTask/PublicWorldSpec -> MockProposer
+                                                       |              |
+                                                context hash     proposal artifact
                                                             |
 SQLite state <- deterministic event <- MockOracle <- typed candidate
      |                    |

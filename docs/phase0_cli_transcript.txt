@@ -5,23 +5,23 @@ Structured diagnostic stderr is omitted unless a command fails validation.
 
 $ uv run wms solve --config <GENERATED_CONFIG> --proposer mock --run-id transcript-resume --interrupt-after 2
 exit: 0
-{"completed_steps":2,"event_payload_hashes":["4807c6fe0c206b9af72cd2fbcdc1d01140568f890ef90873620cf8aa46926268","dce176bdadf4c30b360ffbc71bf5a58c932c94bfb1c2985244ef508bc01e7210"],"run_directory":"<REPO>/artifacts/transcript-runs/transcript-resume","run_id":"transcript-resume","status":"interrupted"}
+{"completed_steps":2,"event_payload_hashes":["468bb21c1f47ecbd8e45f9bca03895e685e041e792cc33c7f69693ce5957206a","ad0654b457830856f64d888441814462f6fea8360b324df9a74e6a4e34262256"],"run_directory":"<REPO>/artifacts/transcript-runs/transcript-resume","run_id":"transcript-resume","status":"interrupted"}
 
 $ uv run wms solve --resume transcript-resume --runs-root artifacts/transcript-runs
 exit: 0
-{"completed_steps":4,"event_payload_hashes":["4807c6fe0c206b9af72cd2fbcdc1d01140568f890ef90873620cf8aa46926268","dce176bdadf4c30b360ffbc71bf5a58c932c94bfb1c2985244ef508bc01e7210","4cc0a19a7de9fef796bd23e3cb600984c2df4cfc7865d2299100d5106bd49444","5f12926b6f3a26ed4565b5e67b0d6b0a46ba89d89038cbb9ad90c0f1ad1f4f6b"],"run_directory":"<REPO>/artifacts/transcript-runs/transcript-resume","run_id":"transcript-resume","status":"completed"}
+{"completed_steps":4,"event_payload_hashes":["468bb21c1f47ecbd8e45f9bca03895e685e041e792cc33c7f69693ce5957206a","ad0654b457830856f64d888441814462f6fea8360b324df9a74e6a4e34262256","1d19d934e05e891b5811a27ea51bad76867c4943be282ea6a1fec4077fd71ddc","9317d0f48adb97e6d7bcaa387af16032f4af6a6a541f30eb03a7ab367d2e11be"],"run_directory":"<REPO>/artifacts/transcript-runs/transcript-resume","run_id":"transcript-resume","status":"completed"}
 
 $ uv run wms replay --run transcript-resume --runs-root artifacts/transcript-runs
 exit: 0
-{"deterministic_summary_hash":"feb49216b172586b131f64a8f62b582d513bceaaa46f0588953159ac2f3d37b2","event_count":4,"event_payload_hashes":["4807c6fe0c206b9af72cd2fbcdc1d01140568f890ef90873620cf8aa46926268","dce176bdadf4c30b360ffbc71bf5a58c932c94bfb1c2985244ef508bc01e7210","4cc0a19a7de9fef796bd23e3cb600984c2df4cfc7865d2299100d5106bd49444","5f12926b6f3a26ed4565b5e67b0d6b0a46ba89d89038cbb9ad90c0f1ad1f4f6b"],"proposer_invocations":0,"run_id":"transcript-resume"}
+{"deterministic_summary_hash":"fadfe59631345dd13ba1f9f45720568e62a78cef4ab17b231cdad832801dc97e","event_count":4,"event_payload_hashes":["468bb21c1f47ecbd8e45f9bca03895e685e041e792cc33c7f69693ce5957206a","ad0654b457830856f64d888441814462f6fea8360b324df9a74e6a4e34262256","1d19d934e05e891b5811a27ea51bad76867c4943be282ea6a1fec4077fd71ddc","9317d0f48adb97e6d7bcaa387af16032f4af6a6a541f30eb03a7ab367d2e11be"],"proposer_invocations":0,"run_id":"transcript-resume"}
 
 $ uv run wms solve --config <GENERATED_CONFIG> --proposer mock --run-id transcript-seed-a
 exit: 0
-{"completed_steps":4,"event_payload_hashes":["4807c6fe0c206b9af72cd2fbcdc1d01140568f890ef90873620cf8aa46926268","dce176bdadf4c30b360ffbc71bf5a58c932c94bfb1c2985244ef508bc01e7210","4cc0a19a7de9fef796bd23e3cb600984c2df4cfc7865d2299100d5106bd49444","5f12926b6f3a26ed4565b5e67b0d6b0a46ba89d89038cbb9ad90c0f1ad1f4f6b"],"run_directory":"<REPO>/artifacts/transcript-runs/transcript-seed-a","run_id":"transcript-seed-a","status":"completed"}
+{"completed_steps":4,"event_payload_hashes":["468bb21c1f47ecbd8e45f9bca03895e685e041e792cc33c7f69693ce5957206a","ad0654b457830856f64d888441814462f6fea8360b324df9a74e6a4e34262256","1d19d934e05e891b5811a27ea51bad76867c4943be282ea6a1fec4077fd71ddc","9317d0f48adb97e6d7bcaa387af16032f4af6a6a541f30eb03a7ab367d2e11be"],"run_directory":"<REPO>/artifacts/transcript-runs/transcript-seed-a","run_id":"transcript-seed-a","status":"completed"}
 
 $ uv run wms solve --config <GENERATED_CONFIG> --proposer mock --run-id transcript-seed-b
 exit: 0
-{"completed_steps":4,"event_payload_hashes":["4807c6fe0c206b9af72cd2fbcdc1d01140568f890ef90873620cf8aa46926268","dce176bdadf4c30b360ffbc71bf5a58c932c94bfb1c2985244ef508bc01e7210","4cc0a19a7de9fef796bd23e3cb600984c2df4cfc7865d2299100d5106bd49444","5f12926b6f3a26ed4565b5e67b0d6b0a46ba89d89038cbb9ad90c0f1ad1f4f6b"],"run_directory":"<REPO>/artifacts/transcript-runs/transcript-seed-b","run_id":"transcript-seed-b","status":"completed"}
+{"completed_steps":4,"event_payload_hashes":["468bb21c1f47ecbd8e45f9bca03895e685e041e792cc33c7f69693ce5957206a","ad0654b457830856f64d888441814462f6fea8360b324df9a74e6a4e34262256","1d19d934e05e891b5811a27ea51bad76867c4943be282ea6a1fec4077fd71ddc","9317d0f48adb97e6d7bcaa387af16032f4af6a6a541f30eb03a7ab367d2e11be"],"run_directory":"<REPO>/artifacts/transcript-runs/transcript-seed-b","run_id":"transcript-seed-b","status":"completed"}
 
 same-seed event payload hashes equal: true
 

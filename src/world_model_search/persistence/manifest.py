@@ -16,7 +16,7 @@ from world_model_search.config import AppConfig
 from world_model_search.domain.types import Task
 from world_model_search.serialization import JsonObject, derive_seed, sha256_bytes, to_json_value
 
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
 
 
 def utc_now() -> str:
@@ -119,7 +119,8 @@ def build_manifest(
         "tasks": [
             {
                 "task_id": task.task_id,
-                "family": task.family,
+                "internal_family_id": task.internal_family_id,
+                "public_world_spec": task.public_world_spec,
                 "split": task.split,
                 "public_artifact_hash": task.public_artifact_hash,
                 "hidden_artifact_id": task.hidden_artifact_id,

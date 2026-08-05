@@ -3,8 +3,9 @@
 ## Phase 0 — Project contract and deterministic shell
 
 **Outcome: complete.** Phase 0 was implemented and stopped at its declared boundary on August 3,
-2026. The package is rooted at `src/world_model_search/`; no nested repository was created. The run
-shell is mock-only and contains no cellular-automaton logic or live language-model call.
+2026, then received a public-context hardening update on August 4, 2026. The package is rooted at
+`src/world_model_search/`; no nested repository was created. The run shell is mock-only and contains
+no cellular-automaton logic or live language-model call.
 
 ### Build items
 
@@ -12,9 +13,10 @@ shell is mock-only and contains no cellular-automaton logic or live language-mod
   dependencies, the `wms` entry point, and formatting/lint/type/test configuration.
 - Strict frozen configuration dataclasses, a fail-before-write YAML loader, structured JSON diagnostic
   logging, immutable canonical manifests/artifacts, a SQLite WAL ledger, and CI commands are present.
-- Frozen dataclasses cover internal/public tasks, candidates and payloads, oracle feedback/results,
-  proposal context/budget, events, branches, and split labels. Protocols cover proposers, archives, and
-  schedulers.
+- Frozen dataclasses cover internal/public tasks, a minimal public world specification, candidates and
+  payloads, oracle feedback/results, proposal context/budget, events, branches, and split labels.
+  `internal_family_id` is retained only in internal task/run metadata and is structurally absent from
+  proposer context. Protocols cover proposers, archives, and schedulers.
 - `MockProposer`, `MockOracle`, and the `phase0-no-ca-fixture` exercise start, transactional event
   recording, interruption, resumption, finalization, read-only reporting, and artifact-based replay.
 - The CLI includes the Section 10 surface. Later-phase commands fail closed and nonzero; Phase 0 solve,
@@ -43,7 +45,7 @@ uv sync --locked --dev
 # exit 0; 14 packages resolved, project and 13 dependencies installed
 
 uv run ruff format --check .
-# exit 0; 40 files already formatted
+# exit 0; 41 files already formatted
 
 uv run ruff check .
 # exit 0; All checks passed!
@@ -52,7 +54,7 @@ uv run mypy
 # exit 0; Success: no issues found in 30 source files
 
 uv run pytest -q
-# exit 0; 20 passed
+# exit 0; 22 passed
 
 uv run wms solve --config configs/smoke.yaml --proposer mock --run-id phase0-smoke
 # exit 0; status=completed, completed_steps=4
@@ -61,16 +63,16 @@ uv run python scripts/record_phase0_transcript.py
 # exit 0; docs/phase0_cli_transcript.txt
 
 ./scripts/ci.sh
-# exit 0; format, lint, strict type checking, and 20 tests passed
+# exit 0; format, lint, strict type checking, and 22 tests passed
 ```
 
 The smoke event payload hashes are, in logical order:
 
 ```text
-4807c6fe0c206b9af72cd2fbcdc1d01140568f890ef90873620cf8aa46926268
-dce176bdadf4c30b360ffbc71bf5a58c932c94bfb1c2985244ef508bc01e7210
-4cc0a19a7de9fef796bd23e3cb600984c2df4cfc7865d2299100d5106bd49444
-5f12926b6f3a26ed4565b5e67b0d6b0a46ba89d89038cbb9ad90c0f1ad1f4f6b
+468bb21c1f47ecbd8e45f9bca03895e685e041e792cc33c7f69693ce5957206a
+ad0654b457830856f64d888441814462f6fea8360b324df9a74e6a4e34262256
+1d19d934e05e891b5811a27ea51bad76867c4943be282ea6a1fec4077fd71ddc
+9317d0f48adb97e6d7bcaa387af16032f4af6a6a541f30eb03a7ab367d2e11be
 ```
 
 ### Presentable artifacts

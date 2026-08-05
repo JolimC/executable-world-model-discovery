@@ -10,8 +10,21 @@ artifacts outside the repository.
 ## DD-002 — Public task capability type
 
 `Task` and `PublicTask` are separate frozen types. `Task.public_view()` is the sole conversion used to
-build `ProposalContext`. The public type cannot represent task seeds, hidden artifact IDs, exact cases,
-or locked rollout suites. This is stronger than depending on a serializer deny-list.
+build `ProposalContext`. The internal type records `internal_family_id` for generation, split management,
+and analysis. The public type has no family field; it carries a `PublicWorldSpec` limited to the mechanics
+needed to interpret observations, successors, and candidate payloads. Fine-grained generator labels can
+therefore not silently become proposer hints. The public type also cannot represent task seeds, hidden
+artifact IDs, exact cases, or locked rollout suites. This is stronger than depending on a serializer
+deny-list.
+
+If later world specifications require dimension, alphabet, neighborhood, or boundary semantics, those
+properties should be added explicitly to `PublicWorldSpec`. A narrow internal label such as a rule
+grammar, symmetry class, or parity family must remain internal unless family visibility is declared as
+an experimental factor.
+
+This separation changes the serialized public context and therefore intentionally advances the run
+manifest schema to version 2. Resume, replay, and reporting reject older schemas before writing or
+mixing events across the context boundary; reproducing a schema-1 run requires its original code.
 
 The configured master seed is deterministically domain-separated with SHA-256 into distinct internal
 task and proposer RNG seeds. The proposer seed in `ProposalBudget` is explicit reproducibility input,

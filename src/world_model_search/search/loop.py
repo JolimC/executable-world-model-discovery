@@ -24,7 +24,7 @@ from world_model_search.logging import structured_log
 from world_model_search.oracle.mock import MockOracle
 from world_model_search.persistence.artifacts import write_content_artifact, write_json_exclusive
 from world_model_search.persistence.database import RunDatabase
-from world_model_search.persistence.manifest import build_manifest, utc_now
+from world_model_search.persistence.manifest import MANIFEST_SCHEMA_VERSION, build_manifest, utc_now
 from world_model_search.proposer.mock import MockProposer
 from world_model_search.search.fixture import make_fixture_task
 from world_model_search.serialization import JsonObject, derive_seed, sha256_json, sha256_text
@@ -79,6 +79,12 @@ def load_manifest(run_directory: Path) -> JsonObject:
         raise PersistenceError(f"cannot read run manifest: {exc}") from exc
     if not isinstance(raw, dict) or not all(isinstance(key, str) for key in raw):
         raise PersistenceError("run manifest must contain a JSON object")
+    recorded_schema = raw.get("manifest_schema_version")
+    if recorded_schema != MANIFEST_SCHEMA_VERSION:
+        raise PersistenceError(
+            f"unsupported run manifest schema {recorded_schema!r}; "
+            f"this build requires schema {MANIFEST_SCHEMA_VERSION}"
+        )
     return raw
 
 
