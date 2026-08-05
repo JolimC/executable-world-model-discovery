@@ -100,4 +100,23 @@ experiment, exact oracle, rollout, DSL, MDL code, archive, scheduler, memory, be
 was performed. Split labels are immutable metadata only. SIGINT handling is implemented, while recorded
 gate evidence uses `--interrupt-after` so interruption occurs reproducibly at a transaction boundary.
 SQLite is tested within one local process lifecycle; cross-host filesystems and concurrent writers have
-not been qualified. Phase 1 has not begun.
+not been qualified.
+
+## Phase 1 — World generator and exact oracle
+
+Phase 1 adds all 256 elementary radius-1 binary CA semantics, independent scalar and bulk simulators,
+an independent locked-trajectory verifier, deterministic semantic-disjoint split assignment, and
+capability-separated public/oracle task bundles. `wms tasks generate --config configs/smoke.yaml`
+creates `artifacts/phase1-benchmark`; its manifest and validation report are canonical frozen data.
+
+Executable evidence is in `test_elementary_phase1.py` and `test_phase1_generation.py`: every reference
+passes, all 2,048 one-bit mutations fail, and 1,024 explicitly seeded cases establish scalar/bulk and
+local-equivalence/rollout agreement including size-one periodic lattices. Generation covers 64 tasks
+per split with 256 distinct semantic hashes. Public bundles are scanned for oracle representations,
+hashes, and seeds. Validation was consumed once by recorded analysis v1. Test assignment metadata was
+audited, but `test_outcomes_accessed` is false and no test outcome was evaluated.
+
+Phase 0 solve/resume/replay/report remains unchanged. `oracle verify` stays fail-closed because a
+candidate-file convention would prematurely introduce the Phase 2 DSL. Remaining risks are the small,
+enumerable semantic universe (semantic hashes therefore remain oracle-only), fixed seeded properties
+rather than Hypothesis, and the existing single-process/local-filesystem qualification.

@@ -79,3 +79,31 @@ compares event payload bytes/hashes, and rebuilds final metrics. There is no sil
 The immutable split enum represents training, development, validation, and test labels. It is metadata
 only. Phase 0 performs no split generation, semantic deduplication, leakage experiment, locked-outcome
 access, or split-based evaluation.
+
+## DD-008 — Phase 1 elementary semantics and independent execution
+
+Rule bit `4*left + 2*center + right` supplies the output, so ordered semantics are `000` through `111`;
+Rules 30, 90, 110, and 150 are constants over that representation. Lattice indices increase left to
+right, both ends wrap periodically, and updates are synchronous. The scalar implementation performs
+explicit modular indexing and calls the rule; the bulk implementation rotates immutable sequences and
+indexes a lookup table. The rollout verifier independently decodes rule bits while comparing locked
+successive states, avoiding shared simulator or local-equivalence machinery.
+
+## DD-009 — Phase 1 identity, splits, and authority boundary
+
+The semantic hash is canonical SHA-256 over domain `elementary-local-semantics-v1` and the eight outputs
+in `000..111` order; names, rule numbers, paths, IDs, and seeds are excluded. A domain-separated seed
+shuffles all 256 semantics once and assigns shuffled positions round-robin to training, development,
+validation, and test. Duplicate semantics therefore cannot cross splits. Public IDs derive from opaque
+shuffled slots rather than rule numbers.
+
+Public v1 artifacts contain only an opaque ID, split, CA mechanics, and demonstrations. Oracle v1
+artifacts separately contain reference semantics, internal family, domain-separated task/rollout/initial
+seeds, semantic hash, and locked trajectory; only `load_hidden_task` is the typed oracle-authority load
+surface. Leakage tests scan serialized public bundles as well as their schema. Benchmark manifest schema
+3 is distinct from Phase 0 run-manifest schema 2, so existing resume/replay meaning is unchanged.
+
+Generator, simulator, oracle, rollout, split, artifact, and analysis versions are frozen in the
+benchmark manifest. Validation v1 is marked consumed. Test semantics participate only in structural
+assignment/deduplication auditing; outcomes are neither invoked nor reported. `oracle verify` remains
+fail-closed until the Phase 2 candidate language exists.

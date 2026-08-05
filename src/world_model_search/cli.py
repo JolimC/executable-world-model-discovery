@@ -18,6 +18,7 @@ from world_model_search.logging import configure_logging
 from world_model_search.replay import replay_run
 from world_model_search.search.loop import resume_run, start_run
 from world_model_search.serialization import canonical_json
+from world_model_search.tasks import generate_benchmark
 
 DEFAULT_RUNS_ROOT = Path("artifacts/runs")
 
@@ -72,7 +73,17 @@ def _dispatch(arguments: argparse.Namespace, repository_root: Path) -> int:
     if arguments.command == "tasks":
         config = load_config(arguments.config)
         configure_logging(config.logging.level)
-        _unavailable("task generation begins in Phase 1; Phase 0 only validates its CLI skeleton")
+        generated = generate_benchmark(repository_root, config)
+        print(
+            canonical_json(
+                {
+                    "benchmark_root": generated.root,
+                    "manifest": generated.root / "manifest.json",
+                    "validation_report": generated.root / "validation-report.json",
+                }
+            )
+        )
+        return 0
     if arguments.command == "oracle":
         _unavailable("real oracle verification begins in Phase 1")
     if arguments.command == "benchmark":
