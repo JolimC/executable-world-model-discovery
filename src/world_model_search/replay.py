@@ -12,8 +12,20 @@ from world_model_search.domain.types import (
     CandidatePayload,
     ProposalContext,
     SearchEvent,
+    SplitLabel,
 )
+from world_model_search.dsl.ast import AstLimits
+from world_model_search.dsl.canonicalize import canonicalize
+from world_model_search.dsl.codec import encoded_length
+from world_model_search.dsl.interpreter import semantic_hash
+from world_model_search.dsl.json_schema import (
+    DslCandidateDocument,
+    ast_canonical_json,
+    ast_to_value,
+)
+from world_model_search.dsl.versions import PREFIX_CODE_VERSION
 from world_model_search.errors import ConfigurationError, ReplayError
+from world_model_search.oracle.exact import ExactDslOracle
 from world_model_search.oracle.mock import MockOracle
 from world_model_search.persistence.artifacts import read_text_artifact
 from world_model_search.persistence.database import RunDatabase
@@ -22,6 +34,8 @@ from world_model_search.search.loop import (
     deterministic_event_payload,
     deterministic_results,
     load_manifest,
+    phase2_deterministic_event_payload,
+    phase2_deterministic_results,
     validate_run_id,
 )
 from world_model_search.serialization import (
@@ -31,6 +45,7 @@ from world_model_search.serialization import (
     sha256_json,
     sha256_text,
 )
+from world_model_search.tasks import HiddenTaskStore, benchmark_root_for_config, load_public_task
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +82,13 @@ def replay_run(*, repository_root: Path, runs_root: Path, run_id: str) -> Replay
     config = _config_from_manifest(manifest)
     if config.run.root != runs_root:
         raise ReplayError("manifest run root does not match --runs-root")
+    if config.schema_version == 2:
+        return _replay_phase2(
+            repository_root=repository_root,
+            run_directory=run_directory,
+            run_id=run_id,
+            config=config,
+        )
     task = make_fixture_task(config)
     context = ProposalContext(task=task.public_view())
     oracle = MockOracle(exact_index=config.run.max_steps - 1)
@@ -161,6 +183,150 @@ def replay_run(*, repository_root: Path, runs_root: Path, run_id: str) -> Replay
     summary_hash = rebuilt_results.get("deterministic_summary_hash")
     if not isinstance(summary_hash, str):
         raise ReplayError("results artifact has no deterministic summary hash")
+    return ReplayReport(
+        run_id=run_id,
+        event_count=len(events),
+        event_payload_hashes=tuple(event.payload_hash for event in events),
+        deterministic_summary_hash=summary_hash,
+    )
+
+
+def _replay_phase2(
+    *, repository_root: Path, run_directory: Path, run_id: str, config: AppConfig
+) -> ReplayReport:
+    """Replay Phase 2 only from recorded candidate documents and frozen analysis."""
+
+    if config.dsl is None:
+        raise ReplayError("Phase 2 manifest has no DSL bounds")
+    benchmark_root = benchmark_root_for_config(repository_root, config)
+    task = load_public_task(benchmark_root, config.run.task_id)
+    allowed = frozenset({SplitLabel.TRAINING, SplitLabel.DEVELOPMENT})
+    store = HiddenTaskStore(benchmark_root)
+    hidden = store.load(task.task_id, allowed_splits=allowed, purpose="phase2-replay")
+    limits = AstLimits(
+        max_depth=config.dsl.max_depth,
+        max_nodes=config.dsl.max_nodes,
+        max_cases=config.dsl.max_cases,
+    )
+    oracle = ExactDslOracle(hidden, limits=limits, response_mode=config.oracle.response_mode)
+    context = ProposalContext(task=task.public_view())
+    with RunDatabase(run_directory / "run.sqlite3", read_only=True) as database:
+        state = database.state()
+        if state.status != "completed":
+            raise ReplayError("only completed runs can be replayed")
+        events = database.events()
+        for expected_sequence, recorded_event in enumerate(events):
+            if recorded_event.sequence != expected_sequence:
+                raise ReplayError("event sequence is not contiguous")
+            if sha256_text(recorded_event.payload_json) != recorded_event.payload_hash:
+                raise ReplayError(f"event {expected_sequence} payload hash mismatch")
+            event_payload = recorded_event.payload
+            candidate_raw = event_payload.get("candidate")
+            if not isinstance(candidate_raw, dict):
+                raise ReplayError(f"event {expected_sequence} has no candidate object")
+            candidate_id = candidate_raw.get("candidate_id")
+            if not isinstance(candidate_id, str):
+                raise ReplayError(f"event {expected_sequence} has no candidate id")
+            row = database.candidate_record(candidate_id)
+            artifact_relative = Path(row["artifact_name"])
+            if artifact_relative.is_absolute() or ".." in artifact_relative.parts:
+                raise ReplayError("candidate artifact path escapes the run directory")
+            proposal_json = read_text_artifact(run_directory / artifact_relative)
+            try:
+                document = DslCandidateDocument.from_json(
+                    proposal_json,
+                    limits=limits,
+                    allowed_macros=frozenset(config.dsl.allowed_macros),
+                )
+            except ValueError as exc:
+                raise ReplayError(f"candidate {candidate_id} artifact is invalid") from exc
+            canonical = canonicalize(document.ast)
+            if canonical != document.ast:
+                raise ReplayError(f"candidate {candidate_id} artifact is noncanonical")
+            digest = sha256_text(proposal_json)
+            candidate_semantic_hash = semantic_hash(canonical, limits=limits)
+            bits = encoded_length(canonical)
+            if (
+                digest != row["payload_hash"]
+                or digest != candidate_raw.get("payload_hash")
+                or ast_canonical_json(canonical) != row["canonical_ast_json"]
+                or ast_canonical_json(canonical) != row["ast_json"]
+                or candidate_semantic_hash != row["semantic_hash"]
+                or bits != row["ast_bits"]
+            ):
+                raise ReplayError(f"candidate {candidate_id} persisted metadata diverged")
+            parent_ids_raw: object = json.loads(row["parent_ids_json"])
+            parent_ids = _string_list(parent_ids_raw, "candidate parent_ids")
+            candidate = Candidate(
+                candidate_id=candidate_id,
+                task_id=row["task_id"],
+                ast=canonical,
+                parent_ids=parent_ids,
+                proposer_id=row["proposer_id"],
+                operator_id=row["operator_id"],
+                context_hash=row["context_hash"],
+                payload_hash=digest,
+                semantic_hash=candidate_semantic_hash,
+            )
+            identity = {
+                "candidate_identity_schema": 2,
+                "task_id": candidate.task_id,
+                "canonical_ast": ast_to_value(canonical),
+                "parent_ids": list(parent_ids),
+                "proposer_id": candidate.proposer_id,
+                "operator_id": candidate.operator_id,
+                "context_hash": candidate.context_hash,
+                "payload_hash": candidate.payload_hash,
+                "coding_version": PREFIX_CODE_VERSION,
+            }
+            if sha256_json(identity) != candidate.candidate_id:
+                raise ReplayError(f"candidate {candidate_id} identity hash mismatch")
+            if candidate.context_hash != context.content_hash:
+                raise ReplayError(f"candidate {candidate_id} context hash mismatch")
+            evaluated = oracle.evaluate(canonical)
+            evaluation_row = database.evaluation_record(candidate_id)
+            try:
+                recorded_result: object = json.loads(evaluation_row["result_json"])
+                rebuilt_result: object = json.loads(canonical_json(evaluated.result))
+            except json.JSONDecodeError as exc:
+                raise ReplayError(f"candidate {candidate_id} evaluation JSON is invalid") from exc
+            if not isinstance(recorded_result, dict) or not isinstance(rebuilt_result, dict):
+                raise ReplayError(f"candidate {candidate_id} evaluation is not an object")
+            recorded_runtime = recorded_result.pop("runtime_ns", None)
+            rebuilt_result.pop("runtime_ns", None)
+            if (
+                evaluation_row["oracle_version"] != config.oracle.oracle_id
+                or recorded_runtime != evaluation_row["runtime_ns"]
+                or canonical_json(recorded_result) != canonical_json(rebuilt_result)
+            ):
+                raise ReplayError(f"candidate {candidate_id} frozen evaluation diverged")
+            rebuilt_payload = phase2_deterministic_event_payload(
+                candidate=candidate,
+                result_payload=evaluated.result.deterministic_payload(),
+                step_index=expected_sequence,
+                ast_bits=bits,
+            )
+            rebuilt_event = SearchEvent.create(
+                sequence=expected_sequence,
+                event_type="candidate_evaluated",
+                logical_cost=expected_sequence + 1,
+                payload=rebuilt_payload,
+                audit_timestamp=recorded_event.audit_timestamp,
+            )
+            if rebuilt_event.payload_json != recorded_event.payload_json:
+                raise ReplayError(f"event {expected_sequence} deterministic payload diverged")
+            if rebuilt_event.payload_hash != recorded_event.payload_hash:
+                raise ReplayError(f"event {expected_sequence} deterministic hash diverged")
+    analysis_manifest = read_text_artifact(run_directory / "analysis" / "manifest.json")
+    rebuilt_results = phase2_deterministic_results(
+        events, analysis_manifest_hash=sha256_text(analysis_manifest)
+    )
+    recorded_results = parse_json_object(read_text_artifact(run_directory / "results.json"))
+    if canonical_json(rebuilt_results) != canonical_json(recorded_results):
+        raise ReplayError("recomputed Phase 2 results differ from frozen results")
+    summary_hash = rebuilt_results.get("deterministic_summary_hash")
+    if not isinstance(summary_hash, str):
+        raise ReplayError("Phase 2 results have no deterministic summary hash")
     return ReplayReport(
         run_id=run_id,
         event_count=len(events),

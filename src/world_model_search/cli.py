@@ -8,17 +8,28 @@ from pathlib import Path
 from typing import NoReturn
 
 from world_model_search.config import load_config
+from world_model_search.domain.types import SplitLabel
+from world_model_search.dsl.ast import AstLimits
+from world_model_search.dsl.json_schema import CandidateJsonError, DslCandidateDocument
 from world_model_search.errors import (
+    CandidateValidationError,
     ConfigurationError,
     PhaseUnavailableError,
     WorldModelSearchError,
 )
 from world_model_search.evaluation.report import create_recorded_report
 from world_model_search.logging import configure_logging
+from world_model_search.oracle.exact import ExactDslOracle
 from world_model_search.replay import replay_run
 from world_model_search.search.loop import resume_run, start_run
 from world_model_search.serialization import canonical_json
-from world_model_search.tasks import generate_benchmark
+from world_model_search.tasks import (
+    HiddenTaskStore,
+    benchmark_root_for_config,
+    generate_benchmark,
+    generate_phase2_benchmark,
+    load_public_task,
+)
 
 DEFAULT_RUNS_ROOT = Path("artifacts/runs")
 
@@ -34,9 +45,10 @@ def _parser() -> argparse.ArgumentParser:
 
     oracle = commands.add_parser("oracle", help="oracle commands")
     oracle_commands = oracle.add_subparsers(dest="oracle_command", required=True)
-    oracle_verify = oracle_commands.add_parser("verify", help="verify a candidate (Phase 1)")
+    oracle_verify = oracle_commands.add_parser("verify", help="verify a typed Phase 2 candidate")
     oracle_verify.add_argument("--task", required=True)
     oracle_verify.add_argument("--candidate", type=Path, required=True)
+    oracle_verify.add_argument("--config", type=Path, default=Path("configs/phase2-smoke.yaml"))
 
     solve = commands.add_parser("solve", help="start or resume a run")
     source = solve.add_mutually_exclusive_group(required=True)
@@ -74,18 +86,66 @@ def _dispatch(arguments: argparse.Namespace, repository_root: Path) -> int:
         config = load_config(arguments.config)
         configure_logging(config.logging.level)
         generated = generate_benchmark(repository_root, config)
+        phase2_generated = generate_phase2_benchmark(repository_root, config)
         print(
             canonical_json(
                 {
                     "benchmark_root": generated.root,
                     "manifest": generated.root / "manifest.json",
                     "validation_report": generated.root / "validation-report.json",
+                    "phase2_benchmark_root": phase2_generated.root,
+                    "phase2_manifest": phase2_generated.root / "manifest.json",
                 }
             )
         )
         return 0
     if arguments.command == "oracle":
-        _unavailable("real oracle verification begins in Phase 1")
+        config = load_config(arguments.config)
+        if config.schema_version != 2 or config.dsl is None:
+            raise ConfigurationError("oracle verify requires a schema-2 Phase 2 configuration")
+        try:
+            candidate_text = arguments.candidate.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise CandidateValidationError("candidate file is unavailable") from exc
+        limits = AstLimits(
+            max_depth=config.dsl.max_depth,
+            max_nodes=config.dsl.max_nodes,
+            max_cases=config.dsl.max_cases,
+        )
+        try:
+            document = DslCandidateDocument.from_json(
+                candidate_text,
+                limits=limits,
+                allowed_macros=frozenset(config.dsl.allowed_macros),
+            )
+        except CandidateJsonError as exc:
+            raise CandidateValidationError(str(exc)) from exc
+        benchmark_root = benchmark_root_for_config(repository_root, config)
+        public_task = load_public_task(benchmark_root, arguments.task)
+        allowed = frozenset({SplitLabel.TRAINING, SplitLabel.DEVELOPMENT})
+        store = HiddenTaskStore(benchmark_root)
+        hidden = store.load(
+            public_task.task_id,
+            allowed_splits=allowed,
+            purpose="phase2-cli-verification",
+        )
+        evaluated = ExactDslOracle(
+            hidden,
+            limits=limits,
+            response_mode=config.oracle.response_mode,
+        ).evaluate(document.ast)
+        print(
+            canonical_json(
+                {
+                    "verification_schema_version": 1,
+                    "task_id": public_task.task_id,
+                    "oracle_version": config.oracle.oracle_id,
+                    "result": evaluated.result.deterministic_payload(),
+                    "diagnostics": {"runtime_ns": evaluated.result.runtime_ns},
+                }
+            )
+        )
+        return 0 if evaluated.result.exact else 1
     if arguments.command == "benchmark":
         _unavailable("benchmark execution begins after Phase 0")
     if arguments.command == "solve":

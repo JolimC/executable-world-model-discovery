@@ -1,0 +1,29 @@
+schema_version: 2
+run:
+  root: artifacts/runs
+  seed: 20260728
+  max_steps: 16
+  task_id: d737b0ee219de6a676c139d1
+  split: training
+proposer:
+  id: enumerative
+  batch_size: 1
+oracle:
+  id: typed-elementary-exact-v1
+  response_mode: score-only
+dsl:
+  version: binary-ca-radius1-dsl-v1
+  max_depth: 8
+  max_nodes: 63
+  max_cases: 8
+  allowed_macros:
+    - Parity
+    - Majority
+enumerator:
+  version: cost-ordered-semantic-first-v1
+  max_bits: 36
+  max_depth: 8
+  max_nodes: 15
+  max_candidates: 50000
+logging:
+  level: INFO

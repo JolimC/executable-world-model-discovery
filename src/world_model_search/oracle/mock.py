@@ -9,6 +9,7 @@ from world_model_search.domain.types import (
     OracleFeedback,
     OracleResponseMode,
     OracleResult,
+    RuleExpr,
 )
 
 
@@ -20,6 +21,8 @@ class MockOracle:
 
     def evaluate(self, candidate: Candidate) -> OracleResult:
         started = perf_counter_ns()
+        if not isinstance(candidate.ast, RuleExpr):
+            raise TypeError("MockOracle accepts only the Phase 0 fixture AST")
         arguments = dict(candidate.ast.arguments)
         index = arguments.get("index")
         type_valid = candidate.ast.node == "Phase0Fixture" and isinstance(index, int)

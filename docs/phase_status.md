@@ -116,7 +116,94 @@ per split with 256 distinct semantic hashes. Public bundles are scanned for orac
 hashes, and seeds. Validation was consumed once by recorded analysis v1. Test assignment metadata was
 audited, but `test_outcomes_accessed` is false and no test outcome was evaluated.
 
-Phase 0 solve/resume/replay/report remains unchanged. `oracle verify` stays fail-closed because a
-candidate-file convention would prematurely introduce the Phase 2 DSL. Remaining risks are the small,
+At the Phase 1 boundary, Phase 0 solve/resume/replay/report remained unchanged and `oracle verify`
+stayed fail-closed because a candidate-file convention would prematurely introduce the Phase 2 DSL.
+Remaining risks were the small,
 enumerable semantic universe (semantic hashes therefore remain oracle-only), fixed seeded properties
 rather than Hypothesis, and the existing single-process/local-filesystem qualification.
+
+## Phase 2 — Typed DSL, canonicalization, and MDL
+
+**Outcome: complete.** Phase 2 implements the typed binary radius-1 language and strict JSON surface,
+total interpreter, task-independent canonicalizer, Phase-1-compatible semantic identity, uniquely
+decodable prefix code, residual/two-part MDL, correctness-first rank, cost-ordered enumerator, fully
+charged truth-table baseline, typed exact oracle, and recorded run/replay/report evidence. It stops
+before Phase 3: there is no mutation, crossover, archive behavior, scheduler policy, memory, active
+query, or model proposer.
+
+### Frozen contracts and bounds
+
+- DSL `binary-ca-radius1-dsl-v1`; candidate schema 1; interpreter
+  `binary-ca-radius1-interpreter-v1`; canonicalizer `binary-ca-canonicalizer-v1`.
+- Semantic hash `elementary-local-semantics-v1`, identical to the Phase 1 ordered `000..111` payload
+  and kept oracle/internal-only.
+- Prefix code `binary-ca-prefix-v1`; residual `enumerative-residual-gamma-v1`; rank
+  `correctness-first-rank-v1`; literal baseline `elementary-truth-table-v1` at 19 bits.
+- DSL limits: depth 8, nodes 63, cases 8. Enumerator limits: 36 bits, depth 8, nodes 15, 50,000 raw
+  examinations. Order is bit cost then canonical JSON; duplicates retain their first representative.
+- Configuration schema 2; run manifest schema 3; database/candidate/event/results schema 2; analysis
+  artifact `phase2-analysis-bundle-v1`. Phase 0 configuration schema 1 and run-manifest schema 2 retain
+  explicit readers.
+
+### Gate evidence
+
+| Gate | Executable/recorded evidence | Result |
+|---|---|---|
+| Deterministic uniquely decodable coding | `test_phase2_codec.py`; 256 catalog and 512 seeded nested round trips in `analysis/gate-report.json`; opcode/complete-value prefix checks; truncation, extension, type, range, and noncanonical rejection | Pass |
+| Canonicalization preservation/idempotence | `test_phase2_interpreter_canonical.py`; recorded seeds 0–511 span all 17 constructors and compare 4,096 exhaustive before/after cases; explicit fold/order/idempotence/double-negation/dead-branch examples | Pass |
+| Rule 90, Rule 150, majority, parity | `test_phase2_mdl_enumerator.py`; target-blind indices 10, 6, 5, and 6 respectively, all 8 bits, plus standard XOR forms | Pass |
+| Total interpreter and CA agreement | finite AST/case limits; all 256 literal tables/hashes and 1,024 Phase 2 rollout transitions; retained Phase 1 scalar/bulk/independent checks | Pass |
+| Residual/MDL and rank | every `e=0..8`, invalid/nonbinary boundaries, 256 randomized correctness-dominance cases, and exact-length-before-runtime checks | Pass |
+| Enumerator determinism/order/duplicates | two full enumerations and independent runs; 29,529 examined, 256 emitted, 12,858 canonical and 16,123 semantic collapses; monotone; cap not hit | Pass |
+| Leakage/capability boundary | exact public types; parse-before-oracle; forbidden capability monkeypatches; all Phase 2 public bundles cover only `000,111`; nested training values scanned | Pass |
+| Lifecycle/replay/frozen report | Phase 0 regressions plus `test_phase2_lifecycle.py` for interrupt/resume, zero-proposer replay, stable independent events/results, versioned persistence, and reporting with live oracle/enumerator disabled | Pass |
+
+The enumerator finds a structured representative for every elementary semantic. Lengths range 4–33
+bits: 64 are shorter than the 19-bit truth-table baseline and 192 are longer. The artifact retains both
+lengths instead of implying that every structured program compresses its literal baseline.
+
+### Reproduction commands and artifacts
+
+```console
+uv sync --locked --dev
+uv run --locked wms tasks generate --config configs/smoke.yaml
+uv run --locked wms oracle verify --task d737b0ee219de6a676c139d1 \
+  --candidate examples/phase2-rule90-candidate.json
+uv run --locked wms solve --config configs/phase2-smoke.yaml --proposer enumerative \
+  --run-id PHASE2-LOCKED-SMOKE
+uv run --locked wms replay --run PHASE2-LOCKED-SMOKE
+uv run --locked wms report --run PHASE2-LOCKED-SMOKE \
+  --out artifacts/reports/PHASE2-LOCKED-SMOKE
+uv run --locked ruff format --check .
+uv run --locked ruff check .
+uv run --locked mypy
+uv run --locked pytest
+./scripts/ci.sh
+```
+
+The recorded run is under `artifacts/runs/PHASE2-LOCKED-SMOKE`. Its frozen `analysis/` contains
+`elementary-complexity.{json,csv,svg}`, `collapse-examples.json`, `gate-report.json`,
+`access-ledger.json`, and a content-hash manifest. The report copies them to
+`artifacts/reports/PHASE2-LOCKED-SMOKE` without live computation. `artifacts/` remains ignored; the
+commands above regenerate the evidence on a clean checkout.
+
+### Split use, validation state, and leakage correction
+
+The exact-oracle smoke uses training task `d737b0ee219de6a676c139d1` (Rule 90). Development is allowed but
+unused. Phase 2 did not consume validation, and its application access ledger records no validation or
+test oracle artifact. Rule 150 is assigned to test, so its required recovery and the all-256 plot are
+standalone public language mechanics, not a task-level oracle call or held-out performance claim.
+
+Legacy Phase 1 random traces frequently cover all eight F0 neighborhoods, making semantics
+reconstructable. Phase 2 does not rewrite them: it generates and exclusively loads the versioned
+`artifacts/phase2-benchmark` bundle whose public coverage is exactly `000` and `111`. DD-015 records
+this deliberate compatibility/leakage resolution.
+
+### Limitations and claims
+
+This phase establishes representation, exact verification, compression accounting, exhaustive baseline
+enumeration, and reproducible lifecycle infrastructure. It does not test H1/H2 or show that a loop,
+archive, language model, scheduler, memory, or learned primitive improves search. F0 has only 256
+semantics and enumeration recovers all, so secrecy and search difficulty remain limited. Runtime is
+diagnostic; no cross-host timing order is claimed. Fixed seeded properties are used instead of
+Hypothesis. The database remains single-process/local-filesystem qualified.

@@ -107,3 +107,144 @@ Generator, simulator, oracle, rollout, split, artifact, and analysis versions ar
 benchmark manifest. Validation v1 is marked consumed. Test semantics participate only in structural
 assignment/deduplication auditing; outcomes are neither invoked nor reported. `oracle verify` remains
 fail-closed until the Phase 2 candidate language exists.
+
+## DD-010 — Phase 2 typed grammar, JSON, and totality boundary
+
+The Phase 2 language is `binary-ca-radius1-dsl-v1`, restricted to a one-dimensional binary lattice,
+radius one, offsets `(-1, 0, 1)` in public `left, center, right` order, periodic boundaries, and
+synchronous updates. Frozen immutable node classes are:
+
+- `BitExpr`: `Const`, `At`, `Not`, `And`, `Or`, `Xor`, `If`, `Parity`, `Majority`, and the dedicated
+  `TruthTable` baseline constructor;
+- `IntExpr`: `IntConst`, `Count`, and `AddConst`;
+- `PredExpr`: `Eq`, `Le`, `Ge`, and `Between`.
+
+`If.condition` is exactly `PredExpr`; both branches are `BitExpr`. Masks are nonempty sorted unique
+subsets of `(-1, 0, 1)`. `IntConst` and `AddConst.amount` are integers in `[-3, 3]`; booleans are never
+integers. `Parity` is sum modulo two. `Majority` is one when the selected count is at least
+`ceil(mask-size / 2)`. `Between(value, lower, upper)` is inclusive. Default language limits are depth
+8, 63 nodes, and exactly eight exhaustive cases; the recorded enumerator uses a narrower 15-node bound.
+
+Candidate JSON schema 1 is an exact-field object containing `candidate_schema_version`, `dsl_version`,
+and `ast`. Nodes use an explicit `op` plus named children/fields. The decoder rejects duplicate or
+trailing data, missing/unknown fields, unknown versions/opcodes, wrong child types, bool-as-int,
+invalid masks/offsets/ranges/macros, and structural-limit excess. Candidates are data only. The
+interpreter exposes no import, file, environment, network, clock, random, reflection, or subprocess
+capability. Finite AST and case limits establish totality; wall-clock timing is diagnostic only.
+
+`ElementaryPublicWorldSpec` is a separate Phase 2 public capability type. This leaves the serialized
+Phase 0 `PublicWorldSpec` and schema-2 context hashes unchanged. The legacy opaque
+`RuleExpr`/`CandidatePayload` remains the explicit Phase 0 reader and is never reinterpreted as DSL.
+
+## DD-011 — Canonicalization and semantic identity
+
+Canonicalizer `binary-ca-canonicalizer-v1` is a bottom-up, size-decreasing or order-orienting pass. Its
+ordering key is `(node class name, canonical AST JSON)`. It recursively canonicalizes children; sorts
+`And`, `Or`, `Xor`, and `Eq`; folds Boolean constants; applies `And`/`Or` idempotence and
+`Xor(x,x)=0`; removes double negation; removes `AddConst(_,0)` and combines/folds small constants when
+the result stays in range; replaces single-input parity/majority with `At`; and removes equal or
+statically selected `If` branches. There are no reverse rewrites, target-dependent choices, or hidden
+queries. Macros of size two or three are retained.
+
+Candidate identity and primary code length use the canonical AST. A noncanonical source is retained
+only as analysis data. Semantic identity hashes canonical JSON with domain
+`elementary-local-semantics-v1` and outputs in `000..111` order. This intentionally uses the exact Phase
+1 payload, so a DSL expression and `ElementaryRule` with the same semantics have the same SHA-256.
+Semantic hashes are internal evaluation/run-analysis metadata; they are absent from public task types,
+public bundles, proposal contexts, oracle feedback, and CLI verification output.
+
+## DD-012 — Prefix code, residual code, and two-part MDL
+
+Prefix code `binary-ca-prefix-v1` is an unpadded bit string. The prefix-free opcodes are:
+
+| Node | Opcode | Paid fields after opcode |
+|---|---:|---|
+| `Const` | `000` | one value bit |
+| `At` | `001` | offset: `00=-1`, `01=0`, `10=1`; `11` invalid |
+| `Not` | `0100` | one encoded `BitExpr` |
+| `And` | `0101` | two encoded `BitExpr` children |
+| `Or` | `0110` | two encoded `BitExpr` children |
+| `Xor` | `0111` | two encoded `BitExpr` children |
+| `If` | `10000` | one `PredExpr`, then two `BitExpr` branches |
+| `Parity` | `10001` | three mask-membership bits; `000` invalid |
+| `Majority` | `10010` | three mask-membership bits; `000` invalid |
+| `IntConst` | `10011` | three-bit biased value `value + 3`; `111` invalid |
+| `Count` | `10100` | three mask-membership bits; `000` invalid |
+| `AddConst` | `10101` | one `IntExpr`, then a three-bit biased amount |
+| `Eq` | `10110` | two encoded `IntExpr` children |
+| `Le` | `10111` | two encoded `IntExpr` children |
+| `Ge` | `11000` | two encoded `IntExpr` children |
+| `Between` | `11001` | value, lower, and upper `IntExpr` children |
+| `TruthTable` | `11111111110` | all eight outputs in `000..111` order |
+
+Fixed arity supplies tree boundaries; every scalar, mask, and child remains paid. The decoder expects a
+root `BitExpr`, consumes exactly one value, re-canonicalizes/re-encodes, and rejects truncation,
+extension, invalid codewords, type mismatches, out-of-range fields, and noncanonical streams. Thus
+`ast_bits` is exact codec length. The truth-table baseline is 19 bits (11-bit opcode plus eight outputs),
+is interpreted and verified like every candidate, and is excluded from structured enumeration.
+
+Residual code `enumerative-residual-gamma-v1` defines `L_N(e)` as the Elias-gamma length of `e+1`:
+`2*floor(log2(e+1))+1`. Binary residual length adds `ceil(log2(binomial(N,e)))`; a combination count of
+one contributes zero location bits. Hence `e=0` costs one bit, while `e=N` costs only the gamma length.
+Invalid `e,N` fail. Alphabet size `q>2` adds `e*ceil(log2(q-1))`; Phase 2 otherwise remains binary.
+Two-part MDL is canonical `ast_bits + residual_bits`.
+
+## DD-013 — Rank, enumeration, and all-256 baseline analysis
+
+Rank `correctness-first-rank-v1` compares type validity, totality, negative local errors, full exactness,
+negative canonical AST bits, and then an optional negative runtime diagnostic. Runtime is excluded from
+deterministic rank/events/replay by default. If explicitly requested, it is only a same-host final tie
+breaker; no cross-host deterministic claim is made.
+
+Enumerator `cost-ordered-semantic-first-v1` builds typed subtrees bottom-up by exact prefix-code cost,
+then breaks ties by canonical AST JSON UTF-8 lexical order. It canonicalizes before insertion, retains
+the first representative of each complete eight-case semantic signature, and counts canonical and
+semantic duplicates. Truth-table literals are excluded. There are no targets, random decisions,
+mutation, crossover, archive, or scheduler. Locked bounds are 36 bits, depth 8, 15 nodes, and 50,000
+raw candidates. The gate exhausts work at 29,529 examined candidates without hitting the cap and emits
+all 256 semantics. Structured lengths range 4–33 bits: 64 beat the 19-bit literal baseline and 192 do
+not. “Not found within bounds” remains distinct from “unrepresentable.”
+
+The standalone public mechanics analysis recovers majority at index 5, parity/Rule 150 at index 6, and
+Rule 90 at index 10, each as an 8-bit macro. Standard Rule 90 XOR (14 bits) and Rule 150 nested XOR
+(23 bits) are independently checked. Rule 150 is not loaded through its generated test task and this is
+not held-out agent performance.
+
+## DD-014 — Exact oracle, configuration, and versioned run lifecycle
+
+`HiddenTaskBundle` strictly validates the oracle artifact, reference semantics/hash, seeds, and
+independently verified locked trajectory. `HiddenTaskStore` validates manifest hashes, enforces a
+training/development allowlist before opening a hidden file, and records every authorized load.
+`ExactDslOracle` canonicalizes/interprets all eight cases, checks the locked rollout through candidate
+semantics, computes semantic/AST/residual metadata, and requires zero errors plus rollout agreement for
+`exact`. The locked configuration uses score-only feedback.
+
+Configuration schema 2 adds DSL/enumerator bounds and versions while schema 1 remains the strict mock
+contract. `wms oracle verify` parses candidate data before hidden access, emits a deterministic result
+plus separately named timing, returns 0 exact / 1 valid but failed / 2 invalid, and omits hidden data.
+
+Phase 2 uses run-manifest schema 3, database schema 2, candidate identity/event/results schema 2, and
+analysis bundle v1. Candidate rows add source/canonical AST, semantic hash, schema, and exact bit length.
+Resume regenerates deterministic enumeration and writes only missing transactional evaluations. Replay
+reads recorded candidates, never calls a proposer, checks frozen evaluations, and recomputes oracle,
+event, and results data. Reports hash/read frozen candidate/evaluation/event/analysis data and copy the
+recorded analysis without importing live enumeration/canonicalization/oracle code. Manifest schema 2
+remains an explicit Phase 0 reader and is never upgraded in place.
+
+## DD-015 — Phase 2 public bundles and split protocol
+
+An audit found that 249 of 256 legacy Phase 1 public bundles incidentally observe all eight local
+neighborhoods. Their F0 semantics are therefore reconstructable despite having no explicit truth table.
+Calling that nonleaking would be false.
+
+Phase 2 adds, rather than overwrites, `phase2-task-bundle-v1` under `artifacts/phase2-benchmark`. It
+preserves opaque IDs and split assignment, but public traces use only uniform-zero and uniform-one
+states and declare coverage `[000,111]`. Its internal manifest schema is 4. `wms tasks generate`
+produces both the legacy Phase 1 evidence and the strengthened Phase 2 bundle. Phase 2 loaders reject
+the legacy version. This preserves Phase 1 while making the new proposer context satisfy the stricter
+Phase 2 leakage gate.
+
+The recorded smoke uses one training task (the opaque Rule 90 assignment). Development is permitted but
+unused. Phase 1 validation remains consumed; Phase 2 validation is unconsumed. Rule 150 and all-256
+analyses use public mathematical semantics, not generated test-task oracle artifacts. The application
+access ledger records no validation/test oracle load. Active queries remain disabled.

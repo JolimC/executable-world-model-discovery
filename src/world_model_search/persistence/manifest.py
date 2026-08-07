@@ -14,9 +14,26 @@ from pathlib import Path
 from world_model_search import __version__
 from world_model_search.config import AppConfig
 from world_model_search.domain.types import Task
+from world_model_search.dsl.versions import (
+    ANALYSIS_ARTIFACT_VERSION,
+    ANALYSIS_VERSION,
+    CANDIDATE_SCHEMA_VERSION,
+    CANONICALIZER_VERSION,
+    DSL_VERSION,
+    ENUMERATOR_VERSION,
+    INTERPRETER_VERSION,
+    PREFIX_CODE_VERSION,
+    RANK_VERSION,
+    RESIDUAL_CODE_VERSION,
+    SEMANTIC_HASH_VERSION,
+    TRUTH_TABLE_BASELINE_VERSION,
+)
+from world_model_search.oracle.elementary import ROLLOUT_VERSION, SIMULATOR_VERSION
+from world_model_search.oracle.exact import EXACT_ORACLE_VERSION
 from world_model_search.serialization import JsonObject, derive_seed, sha256_bytes, to_json_value
 
-MANIFEST_SCHEMA_VERSION = 2
+PHASE0_MANIFEST_SCHEMA_VERSION = 2
+MANIFEST_SCHEMA_VERSION = 3
 
 
 def utc_now() -> str:
@@ -91,8 +108,44 @@ def build_manifest(
 ) -> JsonObject:
     """Build audit metadata; not all manifest fields are deterministic."""
 
+    manifest_schema = (
+        PHASE0_MANIFEST_SCHEMA_VERSION if config.schema_version == 1 else MANIFEST_SCHEMA_VERSION
+    )
+    versions: JsonObject = {
+        "oracle": config.oracle.oracle_id,
+        "dsl": "phase0-opaque-stub-v1",
+        "coding_scheme": "not-implemented-phase0",
+        "prompt": "not-applicable-mock",
+        "scheduler": "not-implemented-phase0",
+    }
+    if config.schema_version == 2:
+        versions = {
+            "configuration_schema": 2,
+            "run_manifest_schema": MANIFEST_SCHEMA_VERSION,
+            "database_schema": 2,
+            "event_schema": 2,
+            "results_schema": 2,
+            "candidate_schema": CANDIDATE_SCHEMA_VERSION,
+            "dsl": DSL_VERSION,
+            "canonicalizer": CANONICALIZER_VERSION,
+            "interpreter": INTERPRETER_VERSION,
+            "semantic_hash": SEMANTIC_HASH_VERSION,
+            "coding_scheme": PREFIX_CODE_VERSION,
+            "residual_code": RESIDUAL_CODE_VERSION,
+            "rank": RANK_VERSION,
+            "enumerator": ENUMERATOR_VERSION,
+            "truth_table_baseline": TRUTH_TABLE_BASELINE_VERSION,
+            "oracle": EXACT_ORACLE_VERSION,
+            "simulator": SIMULATOR_VERSION,
+            "rollout": ROLLOUT_VERSION,
+            "analysis": ANALYSIS_VERSION,
+            "analysis_artifact": ANALYSIS_ARTIFACT_VERSION,
+            "artifact": "immutable-canonical-json-v1",
+            "prompt": "not-applicable-enumerative",
+            "scheduler": "not-implemented-phase2",
+        }
     raw = {
-        "manifest_schema_version": MANIFEST_SCHEMA_VERSION,
+        "manifest_schema_version": manifest_schema,
         "package_version": __version__,
         "run_id": run_id,
         "created_at": utc_now(),
@@ -127,16 +180,10 @@ def build_manifest(
                 "generator_version": task.generator_version,
             }
         ],
-        "versions": {
-            "oracle": config.oracle.oracle_id,
-            "dsl": "phase0-opaque-stub-v1",
-            "coding_scheme": "not-implemented-phase0",
-            "prompt": "not-applicable-mock",
-            "scheduler": "not-implemented-phase0",
-        },
+        "versions": versions,
         "proposer": {
             "identifier": config.proposer.proposer_id,
-            "model": "mock-v1",
+            "model": "mock-v1" if config.schema_version == 1 else "not-applicable",
             "decoding_settings": {},
         },
         "budget": {
@@ -148,6 +195,32 @@ def build_manifest(
         "parent_run_id": None,
         "deterministic_hash_profile": "canonical-json-v1",
     }
+    if config.schema_version == 2:
+        if config.dsl is None or config.enumerator is None:
+            raise AssertionError("Phase 2 manifest requires DSL and enumerator settings")
+        raw["bounds"] = {
+            "dsl": {
+                "max_depth": config.dsl.max_depth,
+                "max_nodes": config.dsl.max_nodes,
+                "max_cases": config.dsl.max_cases,
+                "allowed_macros": config.dsl.allowed_macros,
+            },
+            "enumerator": {
+                "max_bits": config.enumerator.max_bits,
+                "max_depth": config.enumerator.max_depth,
+                "max_nodes": config.enumerator.max_nodes,
+                "max_candidates": config.enumerator.max_candidates,
+                "tie_breaker": "canonical-ast-json-utf8-lexicographic-v1",
+                "duplicate_policy": "canonical-then-semantic-first-v1",
+                "truth_table_literals_enumerated": False,
+            },
+        }
+        raw["protocol"] = {
+            "allowed_oracle_splits": ["training", "development"],
+            "validation_consumed_by_phase2": False,
+            "test_task_outcomes_accessed": False,
+            "active_queries_enabled": False,
+        }
     value = to_json_value(raw)
     if not isinstance(value, dict):  # pragma: no cover - mapping invariant
         raise AssertionError("manifest did not serialize as an object")

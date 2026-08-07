@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import cast
 
 from world_model_search.domain.types import Candidate, OracleResult, SearchEvent, Task
+from world_model_search.dsl.ast import BitExpr
+from world_model_search.dsl.json_schema import ast_canonical_json
 from world_model_search.errors import PersistenceError
 from world_model_search.serialization import canonical_json
 
@@ -110,6 +112,89 @@ class RunDatabase:
                 ),
             )
 
+    def initialize_phase2(self, run_id: str, task: Task, timestamp: str) -> None:
+        """Create the deliberately versioned Phase 2 ledger schema."""
+
+        schema = """
+        CREATE TABLE metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        CREATE TABLE run_state (
+            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+            run_id TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL CHECK (status IN ('running', 'interrupted', 'completed')),
+            next_step INTEGER NOT NULL CHECK (next_step >= 0),
+            started_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE task (
+            task_id TEXT PRIMARY KEY,
+            internal_family_id TEXT NOT NULL,
+            public_world_spec_json TEXT NOT NULL,
+            split TEXT NOT NULL,
+            public_artifact_hash TEXT NOT NULL,
+            hidden_artifact_id TEXT NOT NULL,
+            generator_version TEXT NOT NULL,
+            seed INTEGER NOT NULL
+        );
+        CREATE TABLE candidate (
+            candidate_id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL REFERENCES task(task_id),
+            ast_json TEXT NOT NULL,
+            parent_ids_json TEXT NOT NULL,
+            proposer_id TEXT NOT NULL,
+            operator_id TEXT NOT NULL,
+            context_hash TEXT NOT NULL,
+            payload_hash TEXT NOT NULL,
+            artifact_name TEXT NOT NULL,
+            candidate_schema_version INTEGER NOT NULL,
+            source_ast_json TEXT NOT NULL,
+            canonical_ast_json TEXT NOT NULL,
+            semantic_hash TEXT NOT NULL,
+            ast_bits INTEGER NOT NULL CHECK (ast_bits > 0)
+        );
+        CREATE TABLE evaluation (
+            candidate_id TEXT PRIMARY KEY REFERENCES candidate(candidate_id),
+            oracle_version TEXT NOT NULL,
+            result_json TEXT NOT NULL,
+            runtime_ns INTEGER NOT NULL
+        );
+        CREATE TABLE event (
+            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sequence INTEGER NOT NULL UNIQUE,
+            run_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            logical_cost INTEGER NOT NULL,
+            payload_json TEXT NOT NULL,
+            payload_hash TEXT NOT NULL,
+            audit_timestamp TEXT NOT NULL
+        );
+        """
+        with self.connection:
+            self.connection.executescript(schema)
+            self.connection.execute("INSERT INTO metadata VALUES ('database_schema_version', '2')")
+            self.connection.execute(
+                "INSERT INTO run_state VALUES (1, ?, 'running', 0, ?, ?)",
+                (run_id, timestamp, timestamp),
+            )
+            self.connection.execute(
+                """INSERT INTO task (
+                    task_id, internal_family_id, public_world_spec_json, split,
+                    public_artifact_hash, hidden_artifact_id, generator_version, seed
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    task.task_id,
+                    task.internal_family_id,
+                    canonical_json(task.public_world_spec),
+                    task.split.value,
+                    task.public_artifact_hash,
+                    task.hidden_artifact_id,
+                    task.generator_version,
+                    task.seed,
+                ),
+            )
+
     def state(self) -> RunState:
         row = self.connection.execute(
             "SELECT run_id, status, next_step FROM run_state WHERE singleton = 1"
@@ -176,6 +261,63 @@ class RunDatabase:
                 (next_step, event.audit_timestamp),
             )
 
+    def append_phase2_evaluation(
+        self,
+        *,
+        candidate: Candidate,
+        source_ast: BitExpr,
+        artifact_name: str,
+        result: OracleResult,
+        oracle_version: str,
+        event: SearchEvent,
+        next_step: int,
+    ) -> None:
+        if not isinstance(candidate.ast, BitExpr) or candidate.semantic_hash is None:
+            raise TypeError("Phase 2 persistence requires a typed semantic candidate")
+        result_json = canonical_json(result)
+        with self.connection:
+            self.connection.execute(
+                """INSERT INTO candidate VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    candidate.candidate_id,
+                    candidate.task_id,
+                    ast_canonical_json(candidate.ast),
+                    canonical_json(candidate.parent_ids),
+                    candidate.proposer_id,
+                    candidate.operator_id,
+                    candidate.context_hash,
+                    candidate.payload_hash,
+                    artifact_name,
+                    1,
+                    ast_canonical_json(source_ast),
+                    ast_canonical_json(candidate.ast),
+                    candidate.semantic_hash,
+                    result.ast_bits,
+                ),
+            )
+            self.connection.execute(
+                "INSERT INTO evaluation VALUES (?, ?, ?, ?)",
+                (candidate.candidate_id, oracle_version, result_json, result.runtime_ns),
+            )
+            self.connection.execute(
+                """INSERT INTO event (
+                    sequence, run_id, event_type, logical_cost, payload_json,
+                    payload_hash, audit_timestamp
+                ) SELECT ?, run_id, ?, ?, ?, ?, ? FROM run_state WHERE singleton = 1""",
+                (
+                    event.sequence,
+                    event.event_type,
+                    event.logical_cost,
+                    event.payload_json,
+                    event.payload_hash,
+                    event.audit_timestamp,
+                ),
+            )
+            self.connection.execute(
+                "UPDATE run_state SET next_step = ?, updated_at = ? WHERE singleton = 1",
+                (next_step, event.audit_timestamp),
+            )
+
     def events(self) -> tuple[SearchEvent, ...]:
         rows = self.connection.execute(
             """SELECT sequence, event_type, logical_cost, payload_json,
@@ -204,3 +346,28 @@ class RunDatabase:
         if row is None:
             raise PersistenceError(f"missing candidate record: {candidate_id}")
         return row
+
+    def evaluation_record(self, candidate_id: str) -> sqlite3.Row:
+        row = cast(
+            sqlite3.Row | None,
+            self.connection.execute(
+                "SELECT * FROM evaluation WHERE candidate_id = ?", (candidate_id,)
+            ).fetchone(),
+        )
+        if row is None:
+            raise PersistenceError(f"missing evaluation record: {candidate_id}")
+        return row
+
+    def candidate_records(self) -> tuple[sqlite3.Row, ...]:
+        return tuple(self.connection.execute("SELECT * FROM candidate ORDER BY rowid").fetchall())
+
+    def evaluation_records(self) -> tuple[sqlite3.Row, ...]:
+        return tuple(self.connection.execute("SELECT * FROM evaluation ORDER BY rowid").fetchall())
+
+    def table_count(self, table: str) -> int:
+        if table not in {"candidate", "evaluation", "event", "task"}:
+            raise ValueError("unsupported table count")
+        row = self.connection.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()
+        if row is None:
+            raise PersistenceError(f"cannot count table: {table}")
+        return int(row["count"])

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "world-model-search"
-version = "0.1.0"
+version = "0.2.0"
 description = "Oracle-grounded executable world-model discovery research shell"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -44,4 +44,3 @@ python_version = "3.12"
 strict = true
 packages = ["world_model_search"]
 mypy_path = "src"
-

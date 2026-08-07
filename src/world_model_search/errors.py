@@ -19,3 +19,11 @@ class ReplayError(WorldModelSearchError):
 
 class PhaseUnavailableError(WorldModelSearchError):
     """Raised for a CLI surface reserved for a later implementation phase."""
+
+
+class CandidateValidationError(WorldModelSearchError):
+    """Raised when untrusted candidate data fails closed."""
+
+
+class OracleVerificationError(WorldModelSearchError):
+    """Raised when authorized task data cannot be verified safely."""

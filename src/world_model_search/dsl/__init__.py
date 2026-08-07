@@ -1,1 +1,41 @@
-"""Reserved for the typed DSL introduced in Phase 2."""
+"""Typed Phase 2 binary cellular-automaton DSL."""
+
+from world_model_search.dsl.ast import (
+    AddConst,
+    And,
+    At,
+    Between,
+    Const,
+    Count,
+    Eq,
+    Ge,
+    If,
+    IntConst,
+    Le,
+    Majority,
+    Not,
+    Or,
+    Parity,
+    TruthTable,
+    Xor,
+)
+
+__all__ = [
+    "AddConst",
+    "And",
+    "At",
+    "Between",
+    "Const",
+    "Count",
+    "Eq",
+    "Ge",
+    "If",
+    "IntConst",
+    "Le",
+    "Majority",
+    "Not",
+    "Or",
+    "Parity",
+    "TruthTable",
+    "Xor",
+]

@@ -65,3 +65,19 @@ def test_invalid_yaml_is_reported(tmp_path: Path) -> None:
     path.write_text("run: [", encoding="utf-8")
     with pytest.raises(ConfigurationError):
         load_config(path)
+
+
+def test_phase2_configuration_is_strict_and_round_trips() -> None:
+    config = load_config(Path("configs/phase2-smoke.yaml"))
+    assert config.schema_version == 2
+    assert config.proposer.proposer_id == "enumerative"
+    assert config.oracle.response_mode.value == "score-only"
+    assert config.dsl is not None and config.dsl.max_cases == 8
+    assert config.enumerator is not None and config.enumerator.max_candidates == 50_000
+    assert config_from_mapping(config.to_mapping()) == config
+    raw = config.to_mapping()
+    dsl = raw["dsl"]
+    assert isinstance(dsl, dict)
+    dsl["unknown"] = True
+    with pytest.raises(ConfigurationError, match="unknown"):
+        config_from_mapping(raw)

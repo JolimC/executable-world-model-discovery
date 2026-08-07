@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import NewType, Protocol
 
+from world_model_search.dsl.ast import BitExpr
 from world_model_search.serialization import (
     JsonObject,
     canonical_json,
@@ -44,11 +45,38 @@ class PublicWorldSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class ElementaryPublicWorldSpec:
+    """Proposer-visible mechanics for the bounded Phase 2 elementary world."""
+
+    specification_version: str
+    dimension: int
+    alphabet: tuple[int, ...]
+    radius: int
+    neighborhood_order: tuple[str, ...]
+    offsets: tuple[int, ...]
+    boundary: str
+    update: str
+    observation_type: str
+    successor_type: str
+    candidate_type: str
+    candidate_schema_version: int
+    dsl_version: str
+    bit_constructors: tuple[str, ...]
+    int_constructors: tuple[str, ...]
+    predicate_constructors: tuple[str, ...]
+    macros: tuple[str, ...]
+    max_depth: int
+    max_nodes: int
+    canonicalizer_version: str
+    prefix_code_version: str
+
+
+@dataclass(frozen=True, slots=True)
 class PublicTask:
     """The only task representation authorized for proposer context."""
 
     task_id: str
-    public_world_spec: PublicWorldSpec
+    public_world_spec: PublicWorldSpec | ElementaryPublicWorldSpec
     split: SplitLabel
     demonstrations: tuple[PublicDemonstration, ...]
     active_queries_enabled: bool
@@ -61,7 +89,7 @@ class Task:
 
     task_id: str
     internal_family_id: str
-    public_world_spec: PublicWorldSpec
+    public_world_spec: PublicWorldSpec | ElementaryPublicWorldSpec
     split: SplitLabel
     public_demonstrations: tuple[PublicDemonstration, ...]
     active_queries_enabled: bool
@@ -151,12 +179,13 @@ class CandidatePayload:
 class Candidate:
     candidate_id: str
     task_id: str
-    ast: RuleExpr
+    ast: RuleExpr | BitExpr
     parent_ids: tuple[str, ...]
     proposer_id: str
     operator_id: str
     context_hash: str
     payload_hash: str
+    semantic_hash: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,7 +193,7 @@ class CandidateSummary:
     """Bounded candidate information safe to expose to another proposal."""
 
     candidate_id: str
-    ast: RuleExpr
+    ast: RuleExpr | BitExpr
 
 
 class OracleResponseMode(StrEnum):
