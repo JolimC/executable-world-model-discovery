@@ -24,7 +24,14 @@ def _write_candidate(path: Path, ast: object) -> None:
     )
 
 
-def test_oracle_verify_exact_and_failed_exit_contract(tmp_path: Path, capsys) -> None:
+def test_oracle_verify_exact_and_failed_exit_contract(
+    tmp_path: Path,
+    phase2_repository: Path,
+    monkeypatch: MonkeyPatch,
+    capsys,
+) -> None:
+    config_path = Path("configs/phase2-smoke.yaml").resolve()
+    monkeypatch.chdir(phase2_repository)
     exact_path = tmp_path / "exact.json"
     _write_candidate(
         exact_path,
@@ -34,7 +41,21 @@ def test_oracle_verify_exact_and_failed_exit_contract(tmp_path: Path, capsys) ->
             "right": {"op": "At", "offset": 1},
         },
     )
-    assert main(["oracle", "verify", "--task", RULE90_TASK, "--candidate", str(exact_path)]) == 0
+    assert (
+        main(
+            [
+                "oracle",
+                "verify",
+                "--task",
+                RULE90_TASK,
+                "--candidate",
+                str(exact_path),
+                "--config",
+                str(config_path),
+            ]
+        )
+        == 0
+    )
     exact_output = json.loads(capsys.readouterr().out)
     assert exact_output["result"]["exact"] is True
     assert exact_output["result"]["ast_bits"] == 14
@@ -42,7 +63,21 @@ def test_oracle_verify_exact_and_failed_exit_contract(tmp_path: Path, capsys) ->
 
     wrong_path = tmp_path / "wrong.json"
     _write_candidate(wrong_path, {"op": "Const", "value": 0})
-    assert main(["oracle", "verify", "--task", RULE90_TASK, "--candidate", str(wrong_path)]) == 1
+    assert (
+        main(
+            [
+                "oracle",
+                "verify",
+                "--task",
+                RULE90_TASK,
+                "--candidate",
+                str(wrong_path),
+                "--config",
+                str(config_path),
+            ]
+        )
+        == 1
+    )
     output_text = capsys.readouterr().out
     wrong_output = json.loads(output_text)
     assert wrong_output["result"]["exact"] is False

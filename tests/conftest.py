@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from world_model_search.config import AppConfig, config_from_mapping
+from world_model_search.config import AppConfig, config_from_mapping, load_config
+from world_model_search.tasks import generate_phase2_benchmark
 
 
 @pytest.fixture
@@ -29,3 +30,12 @@ def app_config() -> AppConfig:
 @pytest.fixture
 def repository_root(tmp_path: Path) -> Path:
     return tmp_path / "repository"
+
+
+@pytest.fixture(scope="session")
+def phase2_repository(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Create the ignored Phase 2 benchmark for tests in an isolated repository."""
+
+    repository = tmp_path_factory.mktemp("phase2-repository")
+    generate_phase2_benchmark(repository, load_config(Path("configs/smoke.yaml")))
+    return repository

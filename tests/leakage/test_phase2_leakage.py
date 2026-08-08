@@ -19,9 +19,11 @@ from world_model_search.serialization import canonical_json
 from world_model_search.tasks import HiddenTaskStore, benchmark_root_for_config, load_public_task
 
 
-def test_nested_public_context_excludes_hidden_training_values_and_encodings() -> None:
+def test_nested_public_context_excludes_hidden_training_values_and_encodings(
+    phase2_repository: Path,
+) -> None:
     config = load_config(Path("configs/phase2-smoke.yaml"))
-    root = benchmark_root_for_config(Path.cwd(), config)
+    root = benchmark_root_for_config(phase2_repository, config)
     task = load_public_task(root, config.run.task_id)
     hidden = HiddenTaskStore(root).load(
         task.task_id,
@@ -66,9 +68,12 @@ def test_nested_public_context_excludes_hidden_training_values_and_encodings() -
     assert context.task.public_world_spec.neighborhood_order == ("left", "center", "right")
 
 
-def test_all_public_bundles_remain_free_of_oracle_field_encodings() -> None:
-    public_root = Path("artifacts/phase2-benchmark/public")
+def test_all_public_bundles_remain_free_of_oracle_field_encodings(
+    phase2_repository: Path,
+) -> None:
+    public_root = phase2_repository / "artifacts/phase2-benchmark/public"
     paths = sorted(public_root.glob("*.json"))
+    assert len(paths) == 256
     text = "".join(path.read_text(encoding="utf-8") for path in paths)
     for forbidden in (
         "reference_rule",
