@@ -1,0 +1,82 @@
+experiment_schema_version: 1
+experiment_id: phase3-archive-smoke-v1
+base_config: configs/phase3-smoke.yaml
+output_root: artifacts/experiments/phase3-archive-smoke-v1-locked
+child_runs_root: artifacts/phase3-runs/phase3-archive-smoke-v1-locked
+report_root: artifacts/reports/phase3-archive-smoke-v1-locked
+conditions:
+  - single-incumbent-v1
+  - uniform-diverse-archive-v1
+task_selection:
+  split: validation
+  policy: opaque-public-id-sha256-order-v1
+  task_ids:
+    - ad38d5c55372d8acc6d94434
+    - f449ebc24297d69e1ef64b8d
+    - 27ec2315987cbeac968e7bdb
+    - 5de03909100649956937e815
+    - af87f30ec418410746c535b4
+    - c55fec17d2eaac890190d2e9
+    - 3302ee1a56a9dce19e8c2a8e
+    - d8470c52e5fb6efe9f19112b
+    - 61b9047639944e89ec0f112e
+    - 00dec06afe3f2d64a1b92feb
+    - 93905394c7f8cfa9b09e3251
+    - b53f4110750c4fe3c9c63f26
+search_seeds:
+  - 1001
+  - 1002
+  - 1003
+  - 1004
+  - 1005
+  - 1006
+  - 1007
+  - 1008
+  - 1009
+  - 1010
+  - 1011
+  - 1012
+  - 1013
+  - 1014
+  - 1015
+  - 1016
+  - 1017
+  - 1018
+  - 1019
+  - 1020
+stopping:
+  proposal_attempt_cap: 96
+  oracle_call_cap: 32
+  continue_after_first_exact: true
+response_mode: score-only
+versions:
+  operators: typed-local-operators-v1
+  rng: sha256-counter-streams-v1
+  archive: map-elites-lineage-reserve-v1
+  descriptor: public-probe-descriptor-v1
+  scheduler: uniform-sorted-branches-v1
+  budget: charged-oracle-evaluation-v1
+  initialization: public-dsl-baselines-v1
+  analysis: paired-exact-auc-bootstrap-v1
+primary_endpoint:
+  id: normalized-exact-solve-auc-v1
+  pairing: exact-task-id-and-search-seed-v1
+  noninferiority_tolerance: 0
+  bootstrap_seed: 20260808
+  bootstrap_replicates: 2000
+metrics:
+  - normalized_exact_auc
+  - final_exact_solved
+  - calls_to_first_exact
+  - best_exact_ast_bits
+  - best_two_part_bits
+  - archive_coverage
+  - distinct_candidate_semantics
+  - valid_proposal_rate
+  - semantic_duplicate_rate
+  - operator_outcomes
+  - proposal_oracle_budget_utilization
+validation:
+  mode: phase3-locked-validation-once-v1
+  consume_once: true
+  test_oracle_access_permitted: false

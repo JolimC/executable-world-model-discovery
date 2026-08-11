@@ -207,3 +207,106 @@ archive, language model, scheduler, memory, or learned primitive improves search
 semantics and enumeration recovers all, so secrecy and search difficulty remain limited. Runtime is
 diagnostic; no cross-host timing order is claimed. Fixed seeded properties are used instead of
 Hypothesis. The database remains single-process/local-filesystem qualified.
+
+## Phase 3 — Deterministic mutation, archive search, and paired validation
+
+**Outcome: complete with a negative gate result; stopped without tuning.** The 240 paired cases give a
+diverse-minus-incumbent normalized exact-solve AUC of `-0.000390625`, with deterministic paired-bootstrap
+95% interval `[-0.002994791666666667, 0.0018229166666666667]`. The point estimate fails the frozen
+zero-tolerance no-worse gate, and the interval does not establish superiority.
+
+Phase 3 implements the smallest executable comparison between a diversity-preserving MAP-Elites search
+and a matched single-incumbent search. Both use the same seven charged public DSL baselines, stateless
+counter RNG, typed operators, exact oracle, score-only response, proposal/oracle caps, and
+continue-after-exact behavior. The only intended experimental difference is branch retention/selection.
+
+The archive uses syntax plus fixed public-probe descriptors, separate exact/partial layers, one elite per
+cell, and a bounded lineage reserve. Uniform scheduling records its eligible set and exact selection
+probability. Attempt and oracle accounting remains separate: invalid/no-op attempts consume proposal
+budget, while all emitted evaluations—including duplicates—consume oracle budget. The locked experiment's
+SQLite schema 3 and manifest schema 4 record proposal attempts, evaluations, transitions,
+parent-ordered lineage, budget states, events, all versioned policies, and validation authority. New runs
+use the backward-readable SQLite schema 4 diagnostic extension described below.
+
+Executable evidence covers all operators and typed path classes, depth/node/integer boundaries,
+descriptor-family reachability, randomized archive monotonicity against a reference implementation,
+reserve behavior, cross-task rejection, strict configuration/registry loading, hidden-field scans,
+interruption/resume, independent deterministic execution, zero-generation replay, and frozen-data
+reporting. The locked registry contains 12 publicly selected opaque validation task IDs and 20 seeds
+(240 exact task/seed pairs; 480 child runs), with 96 proposal attempts and 32 charged oracle calls per
+child. Validation/test discipline and the final paired outcome are recorded in the generated experiment
+artifacts described below.
+
+All 480 children completed and reconciled exactly to 32 oracle calls each (15,360 total); every child
+records zero language-model calls. The incumbent solved 3/240 runs and had mean normalized exact AUC
+`0.00390625`; the diverse archive solved 4/240 and had mean AUC `0.003515625`. Diverse archive coverage
+averaged `8.083333333333334` occupied coordinates at the final budget, versus the control's intentionally
+absent archive. That coverage is a diversity diagnostic, not correctness evidence. All 17 aggregate
+files passed their content-hash audit, and the application ledger reports zero test-oracle access.
+
+### Reproduction commands and presentable artifacts
+
+```console
+uv sync --locked --dev
+uv run --locked wms tasks generate --config configs/smoke.yaml
+uv run --locked wms solve --config configs/phase3-smoke.yaml \
+  --proposer mutation --run-id phase3-smoke
+uv run --locked wms replay --run phase3-smoke
+uv run --locked wms report --run phase3-smoke --out artifacts/reports/phase3-smoke
+uv run --locked wms benchmark --experiment experiments/phase3-archive-smoke.yaml
+uv run --locked ruff format --check .
+uv run --locked ruff check .
+uv run --locked mypy
+uv run --locked pytest
+./scripts/ci.sh
+```
+
+The experiment writes its immutable freeze and summary beneath
+`artifacts/experiments/phase3-archive-smoke-v1-locked/`; the content-hashed paired report is copied to
+`artifacts/reports/phase3-archive-smoke-v1-locked/`. Each child run contains lineage JSON/DOT, exact and
+coverage curves, operator diagnostics, budget reconciliation, an access ledger, and an analysis
+manifest. Aggregate outputs retain raw JSON/CSV rows, paired differences, bootstrap interval, solve and
+coverage SVG/CSV curves, operator outcomes, showcased lineages, failure analysis, child-contract hashes,
+and an explicit zero-test-access ledger. Artifacts are ignored and regenerable from the frozen registry.
+
+An initial pre-oracle freeze attempt used the unsuffixed output directory and then failed because child
+run roots incorrectly affected benchmark discovery. No hidden artifact was opened and no validation
+outcome was consumed. The path rule was corrected to bind schema-3 runs to the repository's frozen
+Phase 2 benchmark; the preserved aborted freeze is superseded by the `-locked` registry roots.
+
+After all locked children completed, aggregate CSV publication exposed a projection bug: raw JSON rows
+also contain the JSON-only transition-outcome mapping. The fix ignores nonselected fields only for the
+CSV projection. The final analysis was regenerated from immutable results without child reexecution or
+oracle access; `analysis-amendment.json` freezes both source hashes, the narrow change, and unchanged
+mechanism/statistical contracts. Its SHA-256 is
+`8327d4f7e6b5e61dcd646e2b8ce95a646b53ce2e48345bc7b472ba6f25ba2f0f`; the final analysis-manifest hash
+is `450228ee745aac4af4fbefe5784f15f88657602c06a30ed82cec23b488fc8780`.
+
+The recorded-evidence supplement under `analysis/supplement/` explicitly marks archive-invariant and
+20-seed reproducibility gates passed, the archive no-worse gate negative/failed, and all five additional
+regression gates passed. It records 18,480 proposal attempts, all five archive transition outcomes, and
+per-child manifest/result/event/proposal/database/analysis hashes. The evidence-amendment hash is
+`2aa5ddc5e2f180bc1dad331fa214f100283861e230d0f956fd6613f3ac1d3cd1`; the supplement-manifest hash is
+`530e403ff3fae5b5c3ba1c165f2539be52675447ea4c09ded8ffd4e756c2020d`.
+
+### Post-result implementation hardening
+
+Phase 3's mechanics and evidence have been strengthened without reopening the consumed validation set.
+The runner now uses the shared proposer/archive/scheduler interfaces directly; `TruthTable` local
+mutation is total and flips one chosen output bit; and new tests exercise invalid/no-op proposal-cap
+exhaustion, exact descriptor-bin boundaries, lexical ties, elite/reserve replacement and eviction, and
+the actual public context delivered to the proposer. The full 480-child aggregate is executed twice in
+an integration test using development tasks, and its deterministic contracts match exactly.
+
+New runs record per-attempt process CPU and elapsed time, the oracle contribution to each, and LLM
+call/token counts. Reports copy and hash these values as `runtime-diagnostics.json`; they remain outside
+deterministic replay hashes because timing depends on the host. Phase 3's LLM counts remain zero. Future
+paired analyses also emit a whole-task-cluster bootstrap interval alongside the original task-seed-pair
+interval so repeated seeds on the same task are not treated as fully independent in that sensitivity
+view. The locked point estimate, original interval, gate decision, child runs, and artifacts above were
+not recomputed or modified.
+
+No Phase 4+ mechanism or scientific claim was implemented. Remaining limitations are the 256-semantics
+F0 universe, built-in parity/majority macros, two public descriptor probes, a small locked smoke profile,
+fixed seeded randomized tests rather than exhaustive syntax-space proofs, application-level rather than
+OS-level access auditing, and single-process/local-filesystem persistence qualification.

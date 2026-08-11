@@ -76,6 +76,10 @@ class OracleTaskAccess:
 
 
 def benchmark_root_for_config(repository_root: Path, config: AppConfig) -> Path:
+    if config.schema_version == 3:
+        # Phase 3 child runs may live below a condition/experiment-specific root. The task
+        # authority remains the one frozen repository benchmark, independent of output layout.
+        return repository_root / "artifacts" / "phase2-benchmark"
     return repository_root / config.run.root.parent / "phase2-benchmark"
 
 

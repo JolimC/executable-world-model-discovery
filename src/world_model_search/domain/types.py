@@ -6,7 +6,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import NewType, Protocol
+from typing import NewType, Protocol, TypeVar, runtime_checkable
 
 from world_model_search.dsl.ast import BitExpr
 from world_model_search.serialization import (
@@ -256,6 +256,7 @@ class ProposalBudget:
     max_candidates: int
     start_index: int
     proposer_seed: int
+    operator_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,27 +306,47 @@ class BranchView:
     logical_cost: int
 
 
-class Proposer(Protocol):
+ProposalT_co = TypeVar("ProposalT_co", covariant=True)
+ArchiveDecisionT_co = TypeVar("ArchiveDecisionT_co", covariant=True)
+SchedulerDecisionT_co = TypeVar("SchedulerDecisionT_co", covariant=True)
+
+
+@runtime_checkable
+class Proposer(Protocol[ProposalT_co]):
+    """Shared proposal boundary for mock, mutation, replay, and future LLM sources."""
+
     proposer_id: str
 
     def propose(
         self, context: ProposalContext, budget: ProposalBudget
-    ) -> Sequence[CandidatePayload]: ...
+    ) -> Sequence[ProposalT_co]: ...
 
 
-class Archive(Protocol):
-    """Phase 0 interface only; archive policy begins in Phase 3."""
+@runtime_checkable
+class Archive(Protocol[ArchiveDecisionT_co]):
+    """Search-state boundary implemented by incumbent and diverse archives."""
 
-    def insert_if_elite(
-        self, candidate: Candidate, result: OracleResult, event: SearchEvent
-    ) -> bool: ...
+    archive_version: str
 
-    def candidates(self, task_id: str) -> Sequence[CandidateSummary]: ...
+    def insert(self, candidate: Candidate, result: OracleResult) -> ArchiveDecisionT_co: ...
+
+    def candidate_summaries(self) -> Sequence[CandidateSummary]: ...
+
+    def branch_ids(self) -> tuple[str, ...]: ...
 
 
-class Scheduler(Protocol):
-    """Phase 0 interface only; concrete scheduling begins in Phase 3."""
+@runtime_checkable
+class Scheduler(Protocol[SchedulerDecisionT_co]):
+    """Deterministic branch-selection boundary shared by scheduling policies."""
 
-    def select(self, branches: Sequence[BranchView]) -> BranchId: ...
+    scheduler_version: str
 
-    def observe(self, event: SearchEvent) -> None: ...
+    def select(
+        self,
+        branch_ids: tuple[str, ...],
+        *,
+        master_seed: int,
+        selection_counter: int,
+        remaining_proposal_attempts: int,
+        remaining_oracle_calls: int,
+    ) -> SchedulerDecisionT_co: ...

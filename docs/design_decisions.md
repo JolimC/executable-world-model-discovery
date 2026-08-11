@@ -248,3 +248,133 @@ The recorded smoke uses one training task (the opaque Rule 90 assignment). Devel
 unused. Phase 1 validation remains consumed; Phase 2 validation is unconsumed. Rule 150 and all-256
 analyses use public mathematical semantics, not generated test-task oracle artifacts. The application
 access ledger records no validation/test oracle load. Active queries remain disabled.
+
+## DD-016 — Phase 3 operators and stateless RNG
+
+Phase 3 freezes four typed local operators: local mutation, typed subtree replacement, simplification,
+and typed crossover. Their declared weights are 4:3:2:3. Preorder paths include the root and every
+`BitExpr`, `IntExpr`, and `PredExpr` position. Replacement and crossover preserve the selected static
+type; generated syntax is bounded by the Phase 2 depth/node/case limits and is passed through strict
+candidate JSON, canonicalization, the total interpreter, and prefix coding before it can be evaluated.
+Rejected and canonical no-op attempts are explicit outcomes rather than silent retries.
+
+Randomness is `sha256-counter-streams-v1`: the master search seed, attempt counter, and a domain label
+produce independent scheduler, parent, operator, path, and replacement-syntax streams. This prevents a
+change in one decision's draw count from shifting later decisions. No operator accepts an oracle bundle,
+target semantics, hidden seed, semantic hash, error location, or rollout state.
+
+## DD-017 — Public descriptor, archive, reserve, and incumbent
+
+The descriptor is computed only from candidate syntax and a fixed public probe set. Its coordinates are
+joint canonical node/code-length bins, one of six representation-family labels, and a public-probe output
+cluster. The probe set is the first up to 16 distinct observed local neighborhoods from public traces;
+the Phase 2 bundle supplies only `000` and `111`. Descriptor bins, family rules, probe ordering, and
+serialization are versioned and target-independent.
+
+`map-elites-lineage-reserve-v1` maintains separate exact and partial layers. Each cell has one elite
+under correctness-first rank and lexical candidate-ID tie breaking, plus a two-entry lineage-signature
+reserve. Updates are monotone and task scoped. The matched control is one incumbent with the same rank,
+tie rule, seeds, initialization, operators, budgets, and continue-after-exact policy. It deliberately
+retains shorter exact replacements rather than stopping at the first solution.
+
+## DD-018 — Scheduling, initialization, and exhaustive budgets
+
+The scheduler samples uniformly from sorted eligible branch IDs and records the entire eligible set,
+selected index/branch, exact rational probability, remaining budget, and decision hash. Archive branches
+are occupied elite/reserve branches; the control exposes only its incumbent branch. Cross-task selection
+is rejected.
+
+Both conditions start from the same seven target-independent charged DSL candidates: constants zero/one,
+the three local observations, full-mask parity, and full-mask majority. There is no task-specific seed.
+Every proposal attempt is charged, including invalid and no-op attempts. Every emitted candidate
+evaluation is charged, including canonical/semantic duplicates; there is no oracle-result cache. The
+ledger separately reconciles attempts, operator selections, parse/type/canonical stages, duplicates,
+oracle calls, scheduler decisions, archive outcomes, and the permanently zero language-model-call count.
+
+## DD-019 — Phase 3 identity, persistence, resume, and replay
+
+Candidate identity hashes the canonical AST, ordered parents, proposer/operator IDs, public-context hash,
+payload hash, codec version, and identity schema. The locked experiment used SQLite schema 3, which
+stores proposal attempts independently of candidates/evaluations so repeated charged evaluations do not
+collapse. New Phase 3 runs use the backward-readable schema 4 diagnostic extension described in DD-023.
+Candidate parents must be earlier candidates in the same task/run; ordered lineage edges form an
+auditable acyclic DAG. Attempt, candidate, evaluation, archive transition, budget state, event, and
+next-step state commit atomically.
+
+Manifest schema 4 freezes every mechanism version, bounds, budget rule, archive/descriptor policy,
+authority declaration, and source/lock state. Resume reconstructs the mechanism from committed decisions.
+Replay starts from recorded proposal documents and scheduler decisions: it does not call operator
+generation or live scheduler selection. It rechecks candidate identity, oracle results, archive/incumbent
+transitions, budget states, event hashes, final metrics, and the frozen individual-analysis manifest.
+Reporting reads and hashes committed database/artifact records without invoking operators, scheduling,
+search, or the oracle.
+
+## DD-020 — Paired locked experiment and inference rule
+
+`experiments/phase3-archive-smoke.yaml` is the complete, strict registry. It freezes 12 opaque validation
+task IDs selected by a hash order over public files and split labels only, 20 unique search seeds, both
+conditions, a 96-attempt/32-oracle budget, score-only feedback, all mechanism versions, and normalized
+exact-solve AUC as the primary endpoint. Pairing is exact by task ID and seed. The zero-tolerance gate is
+the paired mean `diverse - incumbent >= 0`; the deterministic paired-bootstrap interval is descriptive,
+and superiority is claimed only when its lower 95% bound exceeds zero. A negative point estimate is
+reported and stops Phase 3 without tuning.
+
+The freeze is written before any validation oracle call and records repository state, dependency lock,
+registry/config/analysis hashes, tasks, seeds, budgets, endpoint, and the prohibition on test access.
+Validation is consumed once for this frozen comparison. Test oracle outcomes are never opened. Aggregate
+artifacts include raw paired rows, differences and confidence interval, solve curves, archive coverage
+over cost, operator outcomes, budget utilization, predeclared lineages, access ledgers, limitations, and
+content hashes. CPU/runtime remain non-inferential diagnostics.
+
+## DD-021 — Scope boundary after Phase 3
+
+Phase 3 uses no language model or external API. It adds no learned primitives, surrogate ranking,
+learned scheduler, memory retrieval, active queries, ensemble selection, meta-learning, or later-domain
+task family. `language_model_calls` is required to remain zero. F0's 256 semantics and the two-public-
+probe descriptor make this a mechanics and paired-smoke result, not evidence of broad world-model
+discovery or scaling.
+
+## DD-022 — Frozen Phase 3 outcome and post-freeze export amendment
+
+The locked comparison produced a diverse-minus-incumbent normalized exact-AUC mean of `-0.000390625`
+over 240 paired task/seed cases. Its deterministic paired-bootstrap 95% interval is
+`[-0.002994791666666667, 0.0018229166666666667]`. The point estimate fails the predeclared zero-tolerance
+no-worse gate; the interval does not support superiority. Phase 3 therefore stops with a negative result
+and no operator, descriptor, archive, task, seed, budget, or analysis tuning.
+
+All 480 children completed before the first aggregate export. That export then rejected the JSON-only
+`transition_outcomes` field while projecting rows to CSV. The correction only tells `csv.DictWriter` to
+ignore fields outside the declared CSV columns and adds an amendment hash to provenance. Aggregation was
+rerun from the 480 immutable results, without reexecuting a child or opening any oracle artifact. The
+original and corrected analysis-source hashes, repository state, unchanged-contract assertions, and
+reason are recorded in `analysis-amendment.json`; its hash is included in the final analysis manifest and
+summary. This is an artifact-serialization correction, not an outcome-driven experimental change.
+
+A second evidence-only amendment adds requirements that were absent from the first aggregate bundle:
+explicit results for all eight gates, paired solve-rate-difference intervals at every charged cost, and
+per-child hashes for manifests, results, event lists, proposal artifacts, timing-free database records,
+and individual-analysis manifests. It changes neither the primary calculation nor its result and reads
+only already completed records. The supplement has its own content-hash manifest linked to the immutable
+primary manifest and evidence-amendment hash.
+
+## DD-023 — Post-result Phase 3 implementation and measurement hardening
+
+After freezing the negative result, Phase 3 was hardened without reopening validation or changing its
+scientific outcome. The concrete mutation proposer, MAP-Elites archive, single-incumbent control, and
+uniform scheduler now implement the shared generic capability protocols used by the runner. Local edit
+is total over every allowed AST constructor, including `TruthTable`, whose mutation flips exactly one
+deterministically selected output bit. Invalid and canonical no-op proposals remain charged attempts and
+cap exhaustion is tested directly.
+
+SQLite schema 4 adds one diagnostic row per new proposal attempt: process CPU, monotonic elapsed time,
+oracle CPU/elapsed contributions, and language-model call/token counts. These host-dependent values are
+exported as `runtime-diagnostics.json`, copied and hashed by reports, and deliberately excluded from the
+deterministic result and replay hashes. Schema-3 locked runs remain readable. Language-model counts are
+zero because Phase 3 has no LLM proposer.
+
+Future experiment analyses report both the frozen task-seed-pair bootstrap and a task-clustered bootstrap
+that resamples whole task IDs as a dependence sensitivity check. The clustered interval is not used to
+reinterpret the already consumed validation result. Regression evidence now includes exact joint-bin
+edges, elite/reserve/tie transitions against an independent reference model, forced invalid/no-op cap
+exhaustion, captured proposer-context leakage scans, and two independent executions of the complete
+480-child aggregate on development tasks. No locked child or validation aggregate was rerun or tuned.

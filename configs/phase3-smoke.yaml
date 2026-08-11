@@ -1,0 +1,46 @@
+schema_version: 3
+run:
+  root: artifacts/runs
+  seed: 20260728
+  task_id: d737b0ee219de6a676c139d1
+  split: training
+  condition_id: uniform-diverse-archive-v1
+proposer:
+  id: mutation
+  batch_size: 1
+oracle:
+  id: typed-elementary-exact-v1
+  response_mode: score-only
+dsl:
+  version: binary-ca-radius1-dsl-v1
+  max_depth: 8
+  max_nodes: 63
+  max_cases: 8
+  allowed_macros:
+    - Parity
+    - Majority
+operators:
+  version: typed-local-operators-v1
+  weights:
+    local-mutation: 4
+    subtree-replacement: 3
+    simplification: 2
+    typed-crossover: 3
+  retry_limit: 0
+  fallback_policy: charged-no-op-v1
+archive:
+  version: map-elites-lineage-reserve-v1
+  descriptor_version: public-probe-descriptor-v1
+  reserve_size: 2
+scheduler:
+  version: uniform-sorted-branches-v1
+budget:
+  version: charged-oracle-evaluation-v1
+  proposal_attempt_cap: 96
+  oracle_call_cap: 32
+initialization:
+  version: public-dsl-baselines-v1
+analysis:
+  version: paired-exact-auc-bootstrap-v1
+logging:
+  level: INFO

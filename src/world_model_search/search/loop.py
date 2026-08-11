@@ -22,7 +22,11 @@ from world_model_search.domain.types import (
 )
 from world_model_search.dsl.ast import AstLimits
 from world_model_search.dsl.json_schema import DslCandidateDocument, ast_to_value
-from world_model_search.dsl.versions import CANDIDATE_SCHEMA_VERSION, PREFIX_CODE_VERSION
+from world_model_search.dsl.versions import (
+    CANDIDATE_SCHEMA_VERSION,
+    PHASE3_MANIFEST_SCHEMA_VERSION,
+    PREFIX_CODE_VERSION,
+)
 from world_model_search.errors import ConfigurationError, PersistenceError
 from world_model_search.evaluation.phase2_analysis import write_phase2_analysis
 from world_model_search.logging import structured_log
@@ -109,11 +113,15 @@ def load_manifest(run_directory: Path) -> JsonObject:
     if not isinstance(raw, dict) or not all(isinstance(key, str) for key in raw):
         raise PersistenceError("run manifest must contain a JSON object")
     recorded_schema = raw.get("manifest_schema_version")
-    if recorded_schema not in {PHASE0_MANIFEST_SCHEMA_VERSION, MANIFEST_SCHEMA_VERSION}:
+    if recorded_schema not in {
+        PHASE0_MANIFEST_SCHEMA_VERSION,
+        MANIFEST_SCHEMA_VERSION,
+        PHASE3_MANIFEST_SCHEMA_VERSION,
+    }:
         raise PersistenceError(
             f"unsupported run manifest schema {recorded_schema!r}; "
             f"this build requires schema {PHASE0_MANIFEST_SCHEMA_VERSION} or "
-            f"{MANIFEST_SCHEMA_VERSION}"
+            f"{MANIFEST_SCHEMA_VERSION}, or {PHASE3_MANIFEST_SCHEMA_VERSION}"
         )
     return raw
 
@@ -599,6 +607,16 @@ def start_run(
     """Create a fully validated run and execute it."""
 
     selected_run_id = validate_run_id(run_id or generate_run_id(config))
+    if config.schema_version == 3:
+        from world_model_search.search.phase3 import start_phase3_run
+
+        return start_phase3_run(
+            repository_root=repository_root,
+            config=config,
+            config_source=config_source,
+            run_id=selected_run_id,
+            interrupt_after=interrupt_after,
+        )  # type: ignore[return-value]
     if interrupt_after is not None and interrupt_after < 1:
         raise ConfigurationError("interrupt_after must be >= 1")
     run_directory = repository_root / config.run.root / selected_run_id
@@ -661,6 +679,17 @@ def resume_run(
     config = _manifest_config(manifest)
     if config.run.root != runs_root:
         raise PersistenceError("recorded run root does not match --runs-root")
+    if config.schema_version == 3:
+        from world_model_search.search.phase3 import resume_phase3_run
+
+        return resume_phase3_run(
+            repository_root=repository_root,
+            run_directory=run_directory,
+            run_id=run_id,
+            config=config,
+            manifest=manifest,
+            interrupt_after=interrupt_after,
+        )  # type: ignore[return-value]
     if config.schema_version == 2:
         if manifest.get("manifest_schema_version") != MANIFEST_SCHEMA_VERSION:
             raise PersistenceError("Phase 2 configuration requires run manifest schema 3")

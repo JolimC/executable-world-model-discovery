@@ -17,12 +17,17 @@ from world_model_search.errors import (
     PhaseUnavailableError,
     WorldModelSearchError,
 )
+from world_model_search.evaluation.phase3_experiment import (
+    load_experiment_registry,
+    run_experiment,
+)
 from world_model_search.evaluation.report import create_recorded_report
 from world_model_search.logging import configure_logging
 from world_model_search.oracle.exact import ExactDslOracle
+from world_model_search.persistence.artifacts import read_text_artifact
 from world_model_search.replay import replay_run
 from world_model_search.search.loop import resume_run, start_run
-from world_model_search.serialization import canonical_json
+from world_model_search.serialization import canonical_json, parse_json_object, sha256_text
 from world_model_search.tasks import (
     HiddenTaskStore,
     benchmark_root_for_config,
@@ -63,7 +68,7 @@ def _parser() -> argparse.ArgumentParser:
         help="deliberately stop after this total number of evaluations",
     )
 
-    benchmark = commands.add_parser("benchmark", help="run an experiment registry (later phase)")
+    benchmark = commands.add_parser("benchmark", help="run a Phase 3 experiment registry")
     benchmark.add_argument("--experiment", type=Path, required=True)
 
     replay = commands.add_parser("replay", help="replay a completed run from recorded proposals")
@@ -147,7 +152,25 @@ def _dispatch(arguments: argparse.Namespace, repository_root: Path) -> int:
         )
         return 0 if evaluated.result.exact else 1
     if arguments.command == "benchmark":
-        _unavailable("benchmark execution begins after Phase 0")
+        registry = load_experiment_registry(arguments.experiment)
+        experiment_root = repository_root / registry.output_root
+        summary_path = experiment_root / "summary.json"
+        if summary_path.is_file():
+            experiment_manifest = parse_json_object(
+                read_text_artifact(experiment_root / "experiment-manifest.json")
+            )
+            if experiment_manifest.get("registry_hash") != registry.content_hash:
+                raise ConfigurationError("completed experiment registry hash differs")
+            benchmark_outcome = parse_json_object(read_text_artifact(summary_path))
+            analysis_manifest = read_text_artifact(experiment_root / "analysis" / "manifest.json")
+            if benchmark_outcome.get("analysis_manifest_hash") != sha256_text(analysis_manifest):
+                raise ConfigurationError("completed experiment analysis hash differs")
+        else:
+            benchmark_outcome = run_experiment(
+                repository_root=repository_root, experiment_path=arguments.experiment
+            )
+        print(canonical_json(benchmark_outcome))
+        return 0
     if arguments.command == "solve":
         if arguments.config is not None:
             config = load_config(arguments.config)

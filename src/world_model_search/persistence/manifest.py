@@ -22,6 +22,20 @@ from world_model_search.dsl.versions import (
     DSL_VERSION,
     ENUMERATOR_VERSION,
     INTERPRETER_VERSION,
+    PHASE3_ANALYSIS_VERSION,
+    PHASE3_ARCHIVE_VERSION,
+    PHASE3_BUDGET_VERSION,
+    PHASE3_CANDIDATE_IDENTITY_VERSION,
+    PHASE3_DATABASE_SCHEMA_VERSION,
+    PHASE3_DESCRIPTOR_VERSION,
+    PHASE3_EVENT_SCHEMA_VERSION,
+    PHASE3_INITIALIZATION_VERSION,
+    PHASE3_MANIFEST_SCHEMA_VERSION,
+    PHASE3_OPERATOR_VERSION,
+    PHASE3_PROPOSAL_ARTIFACT_VERSION,
+    PHASE3_RESULTS_SCHEMA_VERSION,
+    PHASE3_RNG_VERSION,
+    PHASE3_SCHEDULER_VERSION,
     PREFIX_CODE_VERSION,
     RANK_VERSION,
     RESIDUAL_CODE_VERSION,
@@ -108,9 +122,11 @@ def build_manifest(
 ) -> JsonObject:
     """Build audit metadata; not all manifest fields are deterministic."""
 
-    manifest_schema = (
-        PHASE0_MANIFEST_SCHEMA_VERSION if config.schema_version == 1 else MANIFEST_SCHEMA_VERSION
-    )
+    manifest_schema = {
+        1: PHASE0_MANIFEST_SCHEMA_VERSION,
+        2: MANIFEST_SCHEMA_VERSION,
+        3: PHASE3_MANIFEST_SCHEMA_VERSION,
+    }[config.schema_version]
     versions: JsonObject = {
         "oracle": config.oracle.oracle_id,
         "dsl": "phase0-opaque-stub-v1",
@@ -143,6 +159,37 @@ def build_manifest(
             "artifact": "immutable-canonical-json-v1",
             "prompt": "not-applicable-enumerative",
             "scheduler": "not-implemented-phase2",
+        }
+    if config.schema_version == 3:
+        versions = {
+            "configuration_schema": 3,
+            "run_manifest_schema": PHASE3_MANIFEST_SCHEMA_VERSION,
+            "database_schema": PHASE3_DATABASE_SCHEMA_VERSION,
+            "event_schema": PHASE3_EVENT_SCHEMA_VERSION,
+            "results_schema": PHASE3_RESULTS_SCHEMA_VERSION,
+            "candidate_schema": CANDIDATE_SCHEMA_VERSION,
+            "candidate_identity": PHASE3_CANDIDATE_IDENTITY_VERSION,
+            "dsl": DSL_VERSION,
+            "canonicalizer": CANONICALIZER_VERSION,
+            "interpreter": INTERPRETER_VERSION,
+            "semantic_hash": SEMANTIC_HASH_VERSION,
+            "coding_scheme": PREFIX_CODE_VERSION,
+            "residual_code": RESIDUAL_CODE_VERSION,
+            "rank": RANK_VERSION,
+            "oracle": EXACT_ORACLE_VERSION,
+            "simulator": SIMULATOR_VERSION,
+            "rollout": ROLLOUT_VERSION,
+            "operators": PHASE3_OPERATOR_VERSION,
+            "rng": PHASE3_RNG_VERSION,
+            "archive": PHASE3_ARCHIVE_VERSION,
+            "descriptor": PHASE3_DESCRIPTOR_VERSION,
+            "scheduler": PHASE3_SCHEDULER_VERSION,
+            "budget": PHASE3_BUDGET_VERSION,
+            "initialization": PHASE3_INITIALIZATION_VERSION,
+            "analysis": PHASE3_ANALYSIS_VERSION,
+            "proposal_artifact": PHASE3_PROPOSAL_ARTIFACT_VERSION,
+            "artifact": "immutable-canonical-json-v1",
+            "prompt": "not-applicable-no-language-model",
         }
     raw = {
         "manifest_schema_version": manifest_schema,
@@ -220,6 +267,68 @@ def build_manifest(
             "validation_consumed_by_phase2": False,
             "test_task_outcomes_accessed": False,
             "active_queries_enabled": False,
+        }
+    if config.schema_version == 3:
+        if (
+            config.dsl is None
+            or config.operators is None
+            or config.archive is None
+            or config.scheduler is None
+            or config.budget is None
+            or config.initialization is None
+        ):
+            raise AssertionError("Phase 3 manifest requires complete mechanism settings")
+        raw["bounds"] = {
+            "dsl": {
+                "max_depth": config.dsl.max_depth,
+                "max_nodes": config.dsl.max_nodes,
+                "max_cases": config.dsl.max_cases,
+                "allowed_macros": config.dsl.allowed_macros,
+            },
+            "operator": {
+                "path_ordering": "preorder-child-index-v1",
+                "weights": dict(config.operators.weights),
+                "retry_limit": config.operators.retry_limit,
+                "fallback_policy": config.operators.fallback_policy,
+                "crossover_fallback": "ordered-self-crossover-v1",
+            },
+            "archive": {
+                "reserve_size": config.archive.reserve_size,
+                "node_bin_edges": [3, 7, 15, 31, 63],
+                "code_bit_bin_edges": [12, 24, 48, 96, 192],
+                "classifier_precedence": [
+                    "conditional",
+                    "parity",
+                    "threshold",
+                    "count-based",
+                    "position-specific",
+                    "mixed-on-overlap",
+                ],
+                "public_probe": "first-unique-public-local-cases-up-to-16-v1",
+                "tie_breaker": "rank-then-lexicographically-smallest-candidate-id-v1",
+                "duplicate_policy": "canonical-cell-duplicate-semantic-diagnostic-only-v1",
+            },
+        }
+        raw["budget"] = {
+            "version": PHASE3_BUDGET_VERSION,
+            "proposal_attempts": config.budget.proposal_attempt_cap,
+            "oracle_calls": config.budget.oracle_call_cap,
+            "primary_cost_quantum": "one-actual-oracle-invocation",
+            "seed_evaluations_charged": True,
+            "duplicate_evaluations_charged": True,
+            "oracle_cache": False,
+            "language_model_calls": 0,
+            "language_model_tokens": 0,
+            "cpu_seconds": None,
+            "elapsed_seconds": None,
+        }
+        raw["protocol"] = {
+            "condition_id": config.run.condition_id,
+            "ordinary_allowed_oracle_splits": ["training", "development"],
+            "oracle_feedback": "score-only",
+            "active_queries_enabled": False,
+            "cross_task_memory": False,
+            "test_task_outcomes_accessed": False,
         }
     value = to_json_value(raw)
     if not isinstance(value, dict):  # pragma: no cover - mapping invariant

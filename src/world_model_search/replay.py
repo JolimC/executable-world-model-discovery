@@ -5,11 +5,14 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from world_model_search.config import AppConfig, config_from_mapping
 from world_model_search.domain.types import (
     Candidate,
     CandidatePayload,
+    CandidateSummary,
+    OracleResult,
     ProposalContext,
     SearchEvent,
     SplitLabel,
@@ -88,6 +91,14 @@ def replay_run(*, repository_root: Path, runs_root: Path, run_id: str) -> Replay
             run_directory=run_directory,
             run_id=run_id,
             config=config,
+        )
+    if config.schema_version == 3:
+        return _replay_phase3(
+            repository_root=repository_root,
+            run_directory=run_directory,
+            run_id=run_id,
+            config=config,
+            manifest=manifest,
         )
     task = make_fixture_task(config)
     context = ProposalContext(task=task.public_view())
@@ -331,5 +342,254 @@ def _replay_phase2(
         run_id=run_id,
         event_count=len(events),
         event_payload_hashes=tuple(event.payload_hash for event in events),
+        deterministic_summary_hash=summary_hash,
+    )
+
+
+def _replay_phase3(
+    *,
+    repository_root: Path,
+    run_directory: Path,
+    run_id: str,
+    config: AppConfig,
+    manifest: JsonObject,
+) -> ReplayReport:
+    """Replay recorded Phase 3 proposals without operators or live scheduler selection."""
+
+    from world_model_search.dsl.interpreter import semantic_hash as phase3_semantic_hash
+    from world_model_search.dsl.versions import PHASE3_MANIFEST_SCHEMA_VERSION
+    from world_model_search.scheduler.uniform import SchedulerDecision
+    from world_model_search.search.operators import AttemptOutcome
+    from world_model_search.search.phase3 import (
+        _attempt_event_payload,
+        _budget_after_evaluation,
+        _mechanism,
+        _public_context_value,
+        authority_from_manifest,
+        phase3_results,
+        prepare_phase3,
+    )
+    from world_model_search.search.phase3_types import BudgetState, phase3_candidate
+
+    if manifest.get("manifest_schema_version") != PHASE3_MANIFEST_SCHEMA_VERSION:
+        raise ReplayError("Phase 3 manifest schema mismatch")
+    if config.budget is None or config.dsl is None:
+        raise ReplayError("Phase 3 manifest has no budget/DSL settings")
+    authority = authority_from_manifest(manifest)
+    prepared = prepare_phase3(
+        repository_root=repository_root,
+        config=config,
+        authority=authority,
+        purpose=(
+            "phase3-locked-validation-replay"
+            if authority.mode == "phase3-locked-validation-once-v1"
+            else "phase3-replay"
+        ),
+    )
+    mechanism = _mechanism(config, prepared.task)
+    budget = BudgetState(
+        proposal_attempt_cap=config.budget.proposal_attempt_cap,
+        oracle_call_cap=config.budget.oracle_call_cap,
+    )
+    canonical_seen: set[str] = set()
+    semantic_seen: set[str] = set()
+    candidate_by_id: dict[str, Candidate] = {}
+    rebuilt_events: list[SearchEvent] = []
+    with RunDatabase(run_directory / "run.sqlite3", read_only=True) as database:
+        state = database.state()
+        if state.status != "completed":
+            raise ReplayError("only completed runs can be replayed")
+        events = database.events()
+        attempts = database.phase3_attempt_records()
+        evaluations = {row["attempt_index"]: row for row in database.evaluation_records()}
+        transitions = {row["attempt_index"]: row for row in database.phase3_transition_records()}
+        if len(events) != len(attempts):
+            raise ReplayError("Phase 3 event/attempt counts diverge")
+        for attempt_index, (event, attempt_row) in enumerate(zip(events, attempts, strict=True)):
+            if event.sequence != attempt_index or attempt_row["attempt_index"] != attempt_index:
+                raise ReplayError("Phase 3 attempt sequence is not contiguous")
+            artifact_name = attempt_row["artifact_name"]
+            relative = Path(artifact_name)
+            if relative.is_absolute() or ".." in relative.parts:
+                raise ReplayError("Phase 3 proposal path escapes the run directory")
+            artifact_text = read_text_artifact(run_directory / relative)
+            if (
+                sha256_text(artifact_text) != attempt_row["artifact_hash"]
+                or sha256_text(event.payload_json) != event.payload_hash
+            ):
+                raise ReplayError("Phase 3 proposal/event content hash mismatch")
+            artifact = parse_json_object(artifact_text)
+            if set(artifact) != {
+                "artifact_version",
+                "attempt_index",
+                "task_id",
+                "public_context",
+                "public_context_hash",
+                "ordered_parent_ids",
+                "operator",
+                "candidate_document",
+                "submitted_source_ast",
+            }:
+                raise ReplayError("Phase 3 proposal artifact fields are malformed")
+            scheduler_raw = event.payload.get("scheduler")
+            try:
+                scheduler = SchedulerDecision.from_value(scheduler_raw)
+            except ValueError as exc:
+                raise ReplayError("recorded scheduler decision is invalid") from exc
+            if (
+                scheduler.remaining_proposal_attempts != budget.remaining_proposal_attempts
+                or scheduler.remaining_oracle_calls != budget.remaining_oracle_calls
+            ):
+                raise ReplayError("recorded scheduler remaining budget diverged")
+            operator = artifact.get("operator")
+            if (
+                not isinstance(operator, dict)
+                or canonical_json(operator) != attempt_row["operator_json"]
+            ):
+                raise ReplayError("recorded operator decision diverged")
+            parent_ids = artifact.get("ordered_parent_ids")
+            if not isinstance(parent_ids, list) or not all(
+                isinstance(item, str) for item in parent_ids
+            ):
+                raise ReplayError("recorded parent IDs are malformed")
+            parent_id_values = cast(list[str], parent_ids)
+            try:
+                parents = tuple(
+                    CandidateSummary(parent_id, candidate_by_id[parent_id].ast)
+                    for parent_id in parent_id_values
+                )
+            except KeyError as exc:
+                raise ReplayError("Phase 3 parent does not exist earlier in replay") from exc
+            context = ProposalContext(
+                task=prepared.task.public_view(), parents=parents, feedback=()
+            )
+            if context.content_hash != artifact.get("public_context_hash") or canonical_json(
+                _public_context_value(context)
+            ) != canonical_json(artifact.get("public_context")):
+                raise ReplayError("Phase 3 public proposal context diverged")
+            candidate_value = artifact.get("candidate_document")
+            candidate: Candidate | None = None
+            result: OracleResult | None = None
+            decision = None
+            canonical_duplicate = False
+            semantic_duplicate = False
+            if isinstance(candidate_value, dict):
+                try:
+                    document = DslCandidateDocument.from_json(
+                        canonical_json(candidate_value), limits=prepared.limits
+                    )
+                except ValueError as exc:
+                    raise ReplayError("Phase 3 recorded candidate is invalid") from exc
+                if document.ast != canonicalize(document.ast):
+                    raise ReplayError("Phase 3 recorded candidate is noncanonical")
+                candidate_semantic = phase3_semantic_hash(document.ast, limits=prepared.limits)
+                canonical_key = ast_canonical_json(document.ast)
+                canonical_duplicate = canonical_key in canonical_seen
+                semantic_duplicate = candidate_semantic in semantic_seen
+                operator_id = operator.get("operator_id")
+                if not isinstance(operator_id, str):
+                    raise ReplayError("Phase 3 operator identifier is missing")
+                candidate = phase3_candidate(
+                    task_id=prepared.task.task_id,
+                    ast=document.ast,
+                    parent_ids=tuple(parent_id_values),
+                    proposer_id="mutation",
+                    operator_id=operator_id,
+                    context_hash=context.content_hash,
+                    payload_hash=sha256_text(canonical_json(candidate_value)),
+                    coding_version=PREFIX_CODE_VERSION,
+                    semantic_hash=candidate_semantic,
+                )
+                row = database.candidate_record(candidate.candidate_id)
+                if (
+                    row["canonical_ast_json"] != ast_canonical_json(document.ast)
+                    or row["context_hash"] != context.content_hash
+                    or row["semantic_hash"] != candidate_semantic
+                ):
+                    raise ReplayError("Phase 3 candidate persistence diverged")
+                evaluated = ExactDslOracle(
+                    prepared.hidden,
+                    limits=prepared.limits,
+                    response_mode=config.oracle.response_mode,
+                ).evaluate(document.ast)
+                result = evaluated.result
+                decision = mechanism.insert(candidate, result)
+                budget = _budget_after_evaluation(
+                    budget,
+                    operator_attempt=operator_id != "public-baseline-initialization",
+                    canonical_duplicate=canonical_duplicate,
+                    semantic_duplicate=semantic_duplicate,
+                    decision=decision,
+                )
+                evaluation = evaluations.get(attempt_index)
+                transition = transitions.get(attempt_index)
+                if evaluation is None or transition is None:
+                    raise ReplayError("Phase 3 evaluation/transition is missing")
+                recorded_result = parse_json_object(evaluation["result_json"])
+                recorded_result.pop("runtime_ns", None)
+                rebuilt_result = parse_json_object(canonical_json(result))
+                rebuilt_result.pop("runtime_ns", None)
+                if canonical_json(recorded_result) != canonical_json(rebuilt_result) or transition[
+                    "decision_json"
+                ] != canonical_json(decision.to_value()):
+                    raise ReplayError("Phase 3 oracle/archive replay diverged")
+                candidate_by_id[candidate.candidate_id] = candidate
+                canonical_seen.add(canonical_key)
+                semantic_seen.add(candidate_semantic)
+            else:
+                outcome = operator.get("outcome")
+                if outcome not in {AttemptOutcome.NO_OP.value, AttemptOutcome.REJECTED.value}:
+                    raise ReplayError("candidate-free attempt has invalid operator outcome")
+                budget = budget.updated(
+                    proposal_attempts=1,
+                    operator_attempts=1,
+                    invalid_outputs=int(outcome == AttemptOutcome.REJECTED.value),
+                    noop_outputs=int(outcome == AttemptOutcome.NO_OP.value),
+                    scheduler_selections=1,
+                )
+            rebuilt = SearchEvent.create(
+                sequence=attempt_index,
+                event_type="phase3_proposal_attempt",
+                logical_cost=budget.oracle_invocations,
+                payload=_attempt_event_payload(
+                    attempt_index=attempt_index,
+                    task_id=prepared.task.task_id,
+                    scheduler=scheduler,
+                    operator=operator,
+                    artifact_hash=attempt_row["artifact_hash"],
+                    artifact_name=artifact_name,
+                    candidate=candidate,
+                    canonical_duplicate=canonical_duplicate,
+                    semantic_duplicate=semantic_duplicate,
+                    result=result,
+                    decision=decision,
+                    budget=budget,
+                ),
+                audit_timestamp=event.audit_timestamp,
+            )
+            if (
+                rebuilt.payload_json != event.payload_json
+                or rebuilt.payload_hash != event.payload_hash
+            ):
+                raise ReplayError("Phase 3 deterministic event replay diverged")
+            rebuilt_events.append(rebuilt)
+        if canonical_json(budget.to_value()) != canonical_json(database.phase3_budget().to_value()):
+            raise ReplayError("Phase 3 final budget replay diverged")
+    rebuilt_results = phase3_results(
+        tuple(rebuilt_events), budget=budget, mechanism=mechanism, config=config
+    )
+    analysis_manifest = read_text_artifact(run_directory / "analysis" / "manifest.json")
+    rebuilt_results["analysis_manifest_hash"] = sha256_text(analysis_manifest)
+    rebuilt_results["deterministic_summary_hash"] = sha256_json(rebuilt_results)
+    recorded_results = parse_json_object(read_text_artifact(run_directory / "results.json"))
+    if canonical_json(rebuilt_results) != canonical_json(recorded_results):
+        raise ReplayError("Phase 3 frozen results replay diverged")
+    summary_hash = rebuilt_results["deterministic_summary_hash"]
+    if not isinstance(summary_hash, str):
+        raise ReplayError("Phase 3 result hash is malformed")
+    return ReplayReport(
+        run_id=run_id,
+        event_count=len(rebuilt_events),
+        event_payload_hashes=tuple(event.payload_hash for event in rebuilt_events),
         deterministic_summary_hash=summary_hash,
     )
