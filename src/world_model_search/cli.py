@@ -1,4 +1,4 @@
-"""The `wms` Phase 0 command-line surface."""
+"""Versioned Phase 0-4 command-line surface."""
 
 from __future__ import annotations
 
@@ -21,8 +21,17 @@ from world_model_search.evaluation.phase3_experiment import (
     load_experiment_registry,
     run_experiment,
 )
+from world_model_search.evaluation.phase4_experiment import (
+    is_phase4_registry,
+    load_phase4_experiment_registry,
+    phase4_dry_run,
+    run_phase4_experiment,
+)
+from world_model_search.evaluation.random_baseline import run_random_baseline
 from world_model_search.evaluation.report import create_recorded_report
 from world_model_search.logging import configure_logging
+from world_model_search.model.ledger import rebuild_project_ledger
+from world_model_search.model.policy import load_price_policy
 from world_model_search.oracle.exact import ExactDslOracle
 from world_model_search.persistence.artifacts import read_text_artifact
 from world_model_search.replay import replay_run
@@ -63,13 +72,27 @@ def _parser() -> argparse.ArgumentParser:
     solve.add_argument("--run-id")
     solve.add_argument("--runs-root", type=Path, default=DEFAULT_RUNS_ROOT)
     solve.add_argument(
+        "--allow-live-model",
+        action="store_true",
+        help="permit live provider dispatch only with WMS_ALLOW_LIVE_MODEL=1",
+    )
+    solve.add_argument(
         "--interrupt-after",
         type=int,
         help="deliberately stop after this total number of evaluations",
     )
 
-    benchmark = commands.add_parser("benchmark", help="run a Phase 3 experiment registry")
+    benchmark = commands.add_parser("benchmark", help="validate or run an experiment registry")
     benchmark.add_argument("--experiment", type=Path, required=True)
+    benchmark.add_argument("--dry-run", action="store_true")
+    benchmark.add_argument("--allow-live-model", action="store_true")
+
+    llm = commands.add_parser("llm", help="explicitly gated live model commands")
+    llm_commands = llm.add_subparsers(dest="llm_command", required=True)
+    canary = llm_commands.add_parser("canary", help="run the frozen training canary")
+    canary.add_argument("--config", type=Path, required=True)
+    canary.add_argument("--run-id")
+    canary.add_argument("--allow-live-model", action="store_true")
 
     replay = commands.add_parser("replay", help="replay a completed run from recorded proposals")
     replay.add_argument("--run", required=True)
@@ -79,6 +102,20 @@ def _parser() -> argparse.ArgumentParser:
     report.add_argument("--run", required=True)
     report.add_argument("--runs-root", type=Path, default=DEFAULT_RUNS_ROOT)
     report.add_argument("--out", type=Path, required=True)
+
+    baseline = commands.add_parser("baseline", help="contextual no-model baselines")
+    baseline_commands = baseline.add_subparsers(dest="baseline_command", required=True)
+    random_baseline = baseline_commands.add_parser("random", help="target-blind random DSL")
+    random_baseline.add_argument("--config", type=Path, required=True)
+    random_baseline.add_argument("--count", type=int, required=True)
+
+    ledger = commands.add_parser("ledger", help="cumulative paid-model ledger recovery")
+    ledger_commands = ledger.add_subparsers(dest="ledger_command", required=True)
+    rebuild = ledger_commands.add_parser("rebuild", help="rebuild a missing ledger from records")
+    rebuild.add_argument("--policy", type=Path, default=Path("configs/phase4-price-policy-v1.yaml"))
+    rebuild.add_argument(
+        "--ledger", type=Path, default=Path("local_state/project-cost-ledger.sqlite3")
+    )
     return parser
 
 
@@ -152,6 +189,24 @@ def _dispatch(arguments: argparse.Namespace, repository_root: Path) -> int:
         )
         return 0 if evaluated.result.exact else 1
     if arguments.command == "benchmark":
+        if is_phase4_registry(arguments.experiment):
+            phase4_registry = load_phase4_experiment_registry(arguments.experiment)
+            if arguments.dry_run:
+                benchmark_outcome = phase4_dry_run(
+                    repository_root=repository_root, registry=phase4_registry
+                )
+            else:
+                benchmark_outcome = run_phase4_experiment(
+                    repository_root=repository_root,
+                    registry_path=arguments.experiment,
+                    allow_live_model=arguments.allow_live_model,
+                )
+            print(canonical_json(benchmark_outcome))
+            return 0
+        if arguments.dry_run or arguments.allow_live_model:
+            raise ConfigurationError(
+                "--dry-run/--allow-live-model apply only to Phase 4 registries"
+            )
         registry = load_experiment_registry(arguments.experiment)
         experiment_root = repository_root / registry.output_root
         summary_path = experiment_root / "summary.json"
@@ -171,6 +226,36 @@ def _dispatch(arguments: argparse.Namespace, repository_root: Path) -> int:
             )
         print(canonical_json(benchmark_outcome))
         return 0
+    if arguments.command == "llm":
+        if arguments.llm_command != "canary":
+            raise AssertionError("unhandled LLM command")
+        config = load_config(arguments.config)
+        if (
+            config.schema_version != 4
+            or config.phase4_policy is None
+            or config.phase4_policy.stage != "canary"
+            or config.run.split is not SplitLabel.TRAINING
+        ):
+            raise ConfigurationError("LLM canary requires the frozen Phase 4 training profile")
+        configure_logging(config.logging.level)
+        outcome = start_run(
+            repository_root=repository_root,
+            config=config,
+            config_source=str(arguments.config),
+            run_id=arguments.run_id,
+            allow_live_model=arguments.allow_live_model,
+        )
+        print(
+            canonical_json(
+                {
+                    "run_id": outcome.run_id,
+                    "status": outcome.status,
+                    "run_directory": outcome.run_directory,
+                    "live_gate": "explicit-cli-and-environment-opt-in",
+                }
+            )
+        )
+        return 0
     if arguments.command == "solve":
         if arguments.config is not None:
             config = load_config(arguments.config)
@@ -187,6 +272,7 @@ def _dispatch(arguments: argparse.Namespace, repository_root: Path) -> int:
                 config_source=str(arguments.config),
                 run_id=arguments.run_id,
                 interrupt_after=arguments.interrupt_after,
+                allow_live_model=arguments.allow_live_model,
             )
         else:
             if arguments.run_id is not None or arguments.proposer is not None:
@@ -197,6 +283,7 @@ def _dispatch(arguments: argparse.Namespace, repository_root: Path) -> int:
                 runs_root=arguments.runs_root,
                 run_id=arguments.resume,
                 interrupt_after=arguments.interrupt_after,
+                allow_live_model=arguments.allow_live_model,
             )
         print(
             canonical_json(
@@ -235,6 +322,37 @@ def _dispatch(arguments: argparse.Namespace, repository_root: Path) -> int:
                     "json_report": json_path,
                     "markdown_report": markdown_path,
                 }
+            )
+        )
+        return 0
+    if arguments.command == "baseline":
+        if arguments.baseline_command != "random":
+            raise AssertionError("unhandled baseline command")
+        config = load_config(arguments.config)
+        print(
+            canonical_json(
+                run_random_baseline(
+                    repository_root=repository_root,
+                    config=config,
+                    candidate_count=arguments.count,
+                )
+            )
+        )
+        return 0
+    if arguments.command == "ledger":
+        if arguments.ledger_command != "rebuild":
+            raise AssertionError("unhandled ledger command")
+        for path, name in ((arguments.policy, "--policy"), (arguments.ledger, "--ledger")):
+            if path.is_absolute() or ".." in path.parts:
+                raise ConfigurationError(f"{name} must be repository-relative without '..'")
+        policy = load_price_policy(repository_root / arguments.policy)
+        print(
+            canonical_json(
+                rebuild_project_ledger(
+                    repository_root=repository_root,
+                    path=repository_root / arguments.ledger,
+                    policy=policy,
+                )
             )
         )
         return 0

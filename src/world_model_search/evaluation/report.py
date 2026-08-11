@@ -14,6 +14,8 @@ from world_model_search.persistence.artifacts import (
 )
 from world_model_search.persistence.database import RunDatabase
 from world_model_search.persistence.manifest import MANIFEST_SCHEMA_VERSION
+from world_model_search.persistence.phase4_database import Phase4Database
+from world_model_search.phase4_versions import PHASE4_MANIFEST_SCHEMA_VERSION
 from world_model_search.search.loop import load_manifest, validate_run_id
 from world_model_search.serialization import JsonObject, JsonValue, canonical_json, sha256_text
 
@@ -38,6 +40,14 @@ def create_recorded_report(
     if not isinstance(raw_results, dict):
         raise PersistenceError("results artifact must be a JSON object")
     results: JsonObject = raw_results
+    if manifest.get("manifest_schema_version") == PHASE4_MANIFEST_SCHEMA_VERSION:
+        return _create_phase4_report(
+            run_id=run_id,
+            run_directory=run_directory,
+            output_directory=output_directory,
+            manifest=manifest,
+            results=results,
+        )
     with RunDatabase(run_directory / "run.sqlite3", read_only=True) as database:
         state = database.state()
         event_count = len(database.events())
@@ -116,6 +126,133 @@ def create_recorded_report(
         "- Source: frozen manifest, SQLite event ledger, and results artifact\n"
         f"- Recorded events: {event_count}\n"
         f"- Metrics: `{json.dumps(metrics, sort_keys=True)}`\n"
+        f"- Deterministic summary hash: `{results.get('deterministic_summary_hash')}`\n"
+    )
+    write_text_exclusive(markdown_path, markdown)
+    return json_path, markdown_path
+
+
+def _create_phase4_report(
+    *,
+    run_id: str,
+    run_directory: Path,
+    output_directory: Path,
+    manifest: JsonObject,
+    results: JsonObject,
+) -> tuple[Path, Path]:
+    """Verify and copy Phase 4 records without model, cache, search, or oracle access."""
+
+    with Phase4Database(run_directory / "run.sqlite3", read_only=True) as database:
+        state = database.state()
+        if state.status not in {
+            "completed",
+            "cost-cap-exhausted",
+            "usage-uncertain",
+            "failed",
+        }:
+            raise PersistenceError("report command requires a terminal Phase 4 run")
+        requests = tuple(dict(row) for row in database.requests())
+        counts: JsonObject = {
+            "events": database.table_count("event"),
+            "candidates": database.table_count("candidate"),
+            "evaluations": database.table_count("evaluation"),
+            "model_requests": database.table_count("model_request"),
+            "proposal_items": database.table_count("proposal_item"),
+            "archive_transitions": database.table_count("archive_transition"),
+            "lineage_edges": database.table_count("lineage_edge"),
+        }
+    artifact_hashes: JsonObject = {}
+    for request in requests:
+        for name_field, hash_field in (
+            ("prompt_artifact", "prompt_hash"),
+            ("response_artifact", "response_hash"),
+        ):
+            name = request.get(name_field)
+            digest = request.get(hash_field)
+            if name is None and digest is None:
+                continue
+            if not isinstance(name, str) or not isinstance(digest, str):
+                raise PersistenceError("Phase 4 request artifact metadata is incomplete")
+            relative = Path(name)
+            if relative.is_absolute() or ".." in relative.parts:
+                raise PersistenceError("Phase 4 request artifact path escapes its run")
+            if sha256_text(read_text_artifact(run_directory / relative)) != digest:
+                raise PersistenceError(f"Phase 4 request artifact hash mismatch: {name}")
+            artifact_hashes[name] = digest
+        request_name = request.get("request_artifact")
+        request_hash = request.get("request_hash")
+        if not isinstance(request_name, str) or not isinstance(request_hash, str):
+            raise PersistenceError("Phase 4 request identity artifact metadata is incomplete")
+        request_text = read_text_artifact(run_directory / request_name)
+        try:
+            request_value: object = json.loads(request_text)
+        except json.JSONDecodeError as exc:
+            raise PersistenceError("Phase 4 request identity artifact is invalid") from exc
+        if not isinstance(request_value, dict) or request_value.get("request_hash") != request_hash:
+            raise PersistenceError("Phase 4 request identity artifact hash diverged")
+        artifact_hashes[request_name] = sha256_text(request_text)
+
+    analysis_root = run_directory / "analysis"
+    manifest_text = read_text_artifact(analysis_root / "manifest.json")
+    try:
+        analysis_manifest: object = json.loads(manifest_text)
+    except json.JSONDecodeError as exc:
+        raise PersistenceError("Phase 4 analysis manifest is invalid") from exc
+    if not isinstance(analysis_manifest, dict):
+        raise PersistenceError("Phase 4 analysis manifest must be an object")
+    files = analysis_manifest.get("files")
+    diagnostic_names = analysis_manifest.get("non_deterministic_diagnostic_files", [])
+    if not isinstance(files, dict) or not all(
+        isinstance(name, str) and isinstance(digest, str) for name, digest in files.items()
+    ):
+        raise PersistenceError("Phase 4 analysis file map is invalid")
+    if diagnostic_names != ["runtime-diagnostics.json"]:
+        raise PersistenceError("Phase 4 runtime diagnostic declaration is invalid")
+    frozen: dict[str, str] = {}
+    for name, digest in files.items():
+        content = read_text_artifact(analysis_root / name)
+        if sha256_text(content) != digest:
+            raise PersistenceError(f"frozen Phase 4 analysis hash mismatch: {name}")
+        frozen[name] = content
+    runtime_diagnostics = read_text_artifact(analysis_root / "runtime-diagnostics.json")
+    if results.get("analysis_manifest_hash") != sha256_text(manifest_text):
+        raise PersistenceError("Phase 4 results/analysis manifest hash mismatch")
+    configuration_hash = manifest.get("configuration_hash")
+    if not isinstance(configuration_hash, str):
+        raise PersistenceError("Phase 4 manifest has no configuration hash")
+    report: JsonObject = {
+        "schema_version": 4,
+        "run_id": run_id,
+        "source": "frozen-run-artifacts-only",
+        "evidence_class": results.get("evidence_class"),
+        "scientific_conclusion": "not-established-by-fake-evidence"
+        if results.get("evidence_class") == "fake"
+        else "individual-live-run-only",
+        "configuration_hash": configuration_hash,
+        "recorded_counts": counts,
+        "request_artifact_hashes": artifact_hashes,
+        "analysis_manifest_hash": sha256_text(manifest_text),
+        "analysis_file_hashes": files,
+        "diagnostic_file_hashes": {"runtime-diagnostics.json": sha256_text(runtime_diagnostics)},
+        "runtime_diagnostics": json.loads(runtime_diagnostics),
+        "results": results,
+    }
+    output_directory.mkdir(parents=True, exist_ok=True)
+    for name, content in frozen.items():
+        write_text_exclusive(output_directory / name, content + "\n")
+    write_text_exclusive(output_directory / "runtime-diagnostics.json", runtime_diagnostics + "\n")
+    json_path = output_directory / "summary.json"
+    markdown_path = output_directory / "summary.md"
+    write_json_exclusive(json_path, report)
+    markdown = (
+        "# Phase 4 frozen LLM-search report\n\n"
+        f"- Run: `{run_id}`\n"
+        f"- Evidence: `{results.get('evidence_class')}`; fake evidence supports lifecycle "
+        "validation only, not H1/H2 conclusions\n"
+        "- Source: immutable model request/response, SQLite, results, and analysis records only\n"
+        f"- Recorded requests/items/evaluations: "
+        f"{counts['model_requests']}/{counts['proposal_items']}/{counts['evaluations']}\n"
+        f"- Metrics: `{json.dumps(results.get('metrics'), sort_keys=True)}`\n"
         f"- Deterministic summary hash: `{results.get('deterministic_summary_hash')}`\n"
     )
     write_text_exclusive(markdown_path, markdown)

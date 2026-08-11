@@ -306,7 +306,156 @@ interval so repeated seeds on the same task are not treated as fully independent
 view. The locked point estimate, original interval, gate decision, child runs, and artifacts above were
 not recomputed or modified.
 
-No Phase 4+ mechanism or scientific claim was implemented. Remaining limitations are the 256-semantics
+At the Phase 3 handoff, no Phase 4+ mechanism or scientific claim was implemented. Remaining limitations are the 256-semantics
 F0 universe, built-in parity/majority macros, two public descriptor probes, a small locked smoke profile,
 fixed seeded randomized tests rather than exhaustive syntax-space proofs, application-level rather than
 OS-level access auditing, and single-process/local-filesystem persistence qualification.
+
+## Phase 4 — Language-model proposer and primary experiment infrastructure
+
+**Implementation outcome: complete; live compatibility gate passed by the revised training canary.**
+Phase 4 adds the executable LLM/search/persistence/analysis machinery. The first authorized canary's two
+charged Responses calls reached its 512-output-token limit and failed schema completion. The authorized
+versioned correction raised only the per-request output allowance and derived token caps: its single call
+returned two strict candidate documents, both validated and evaluated, and replayed without provider
+access. The cumulative published-rate estimate is $0.00357 with no uncertain charge. No development
+outcome was observed, no test oracle artifact was opened, and the one-time test experiment remains an
+explicit non-executable pending declaration.
+
+### Frozen implementation contracts
+
+- Package 0.4.0 pins the official `openai==2.53.0` SDK. SDK objects remain inside
+  `OpenAIResponsesBackend`; search, persistence, replay, and analysis use immutable provider-neutral
+  request, response, usage, error, and backend contracts.
+- The model is exactly `gpt-5-mini-2025-08-07` through synchronous `v1/responses`, default service
+  tier, low reasoning effort, disabled storage/truncation, and strict JSON-schema output. The current
+  official model page documents the snapshot and rates but labels the snapshot deprecated. The canary
+  established project access to the exact snapshot and request fields, but not a complete structured
+  batch under the frozen output limit. No alias or replacement is used.
+- Price policy `phase4-price-and-ceilings-v1` uses integer nano-USD: $0.25/MTok uncached input,
+  $0.025/MTok cached input, and $2/MTok output. Reasoning is already a subset of output. Hard ceilings
+  are exactly $100 project, $30 Phase 4, $0.25 canary, $9.75 development, $20 locked test,
+  $0.01/request, $0.15 pilot child, and $0.50 locked child. Pilot v2 uses 60 children at the full
+  $0.15 child ceiling, so all child ceilings still total $9.00. The policy hash reverified on August 11, 2026 is
+  `120ca1d0cb66d23230ff8267d4c0eb492421e8de55dc4e1e97950e5cd7fc93fa`.
+- Live dispatch needs `--allow-live-model`, `WMS_ALLOW_LIVE_MODEL=1`, a key at the adapter boundary,
+  exact price-policy/ledger state, and successful hierarchical reservation. Fake, dry-run, replay,
+  reporting, prompt snapshots, and tests do not make provider calls.
+- Configuration schema 4, manifest/database schema 5, event/results schema 4, candidate identity v1,
+  request-state v1, joint-budget v1, and recorded analysis/report v1 are additive. Schemas 1-3 and all
+  Phase 0-3 meanings remain explicit readers.
+- A is stateless direct sampling with no parent, score, prior output, or conversation. B and C use the
+  same iterative prompt, role, and bounded parent-associated score; C selects one uniform archive branch
+  per call. Batch items share the call context and commit in response order.
+- Strict parsing rejects fenced/prose/trailing/duplicate JSON, wrong root/version/role/size, unknown or
+  ill-typed fields, forbidden ranges/macros, and excessive ASTs. Items validate independently. Accepted
+  complete ASTs are canonicalized and evaluated directly; no post-LLM mutation occurs.
+- Exact cache identity freezes transport/model/endpoint/tier, exact prompt bytes, schema, role, batch,
+  and settings while excluding secrets, paths, timestamps, and provider request IDs. Retries allow one
+  identical request only for provider-established zero-usage rate limits or charged malformed
+  envelopes. Ambiguous transport/usage failures are terminal. Immutable response/failure evidence and
+  usage precede item commits; uncertain dispatch retains its reservation. Every attempt rechecks token
+  caps, and an unaffordable paid reservation ends as replayable `cost-cap-exhausted` before dispatch.
+- Seven shared initialization evaluations are charged in A/B/C. Duplicate items remain charged. The
+  target-blind `random-dsl` baseline reports construction/proposal/oracle/CPU cost and zero model work;
+  it is contextual, not token-matched.
+
+### No-cost experiment and presentable artifact
+
+`experiments/phase4-fake-smoke.yaml` executes A/B/C through the real engine on one training task and one
+seed. The paired fake outcome is H1 `0.0`, H2 `0.0`, with degenerate `[0.0, 0.0]` machinery-test
+intervals. Both clustered two-sided p-values and Holm-adjusted p-values are `1.0`, so neither primary
+hypothesis is rejected. The aggregate records `blocked-fake-evidence-only`; this is not a scientific
+conclusion.
+
+The generated record-only artifact is
+`artifacts/reports/phase4-fake-smoke-v1/phase4-artifact.json`. It links child manifest/results/analysis
+hashes, exact prompt/request/response records, budget/cost/token reconciliation, raw paired rows,
+H1/H2 intervals, curves, best-program/MDL and lineage sources, validity/duplicate/cache/retry states,
+runtime diagnostics, access ledgers, lock/model/prompt/price contracts, and failure analysis. Its
+SHA-256 in this verification run is
+`73598cfd022c027f30feab54766d4e578f942c753e4350b4c9ce045574c6fbad`; the aggregate deterministic
+summary hash is `56cc7c3236910da239f72722c553aa46e4ebe094fe33510420e6054864398320`.
+Generated `artifacts/` remain ignored and reproducible.
+
+### Live training-canary evidence
+
+`PHASE4-LIVE-CANARY` made one logical call and the one permitted identical retry. Both physical requests
+returned HTTP 200 with 1,400 input and 512 output tokens. The first used 320 reasoning tokens and ended
+with truncated JSON; the retry used all 512 output tokens as reasoning and returned no candidate text.
+Both are immutable charged `schema-failure` records, with zero valid proposal items and no post-model
+repair. This is a compatibility-gate failure even though the run lifecycle reached terminal status
+`completed`.
+
+The two estimates are $0.001374 and $0.001086, totaling $0.00246. The ledger records $0.005676 reserved,
+$0.003216 released, $0 uncertain, and no active reservation; `reserved = actual + uncertain + released`.
+The canary-stage balance is $0.24754, the Phase 4 balance $29.99754, and the project balance $99.99754.
+Dashboard-export reconciliation is unavailable; these are conservative published-rate estimates.
+
+Replay ran with the API key and live opt-in removed and HTTP proxies pointed at a closed local endpoint.
+It made zero proposer/provider calls and reproduced deterministic summary hash
+`76a8591e515991a3ff52afb574790885d39bf7dd4d66efbcab0719f6cd2e855c`. The record-only report is
+`artifacts/reports/PHASE4-LIVE-CANARY/summary.json`, canonical SHA-256
+`b14778d30b1151f1a0a99c8f923fc7b6cccc1034bb57cf58849f8bfd929df4b3`.
+
+The authorized correction changed `max_output_tokens` from 512 to 2,048, the retry-aware output cap from
+2,048 to 4,096, the total-token cap from 52,048 to 54,096, and the cache namespace to
+`phase4-canary-output-2048-v2`. It did not change the exact model, endpoint, service tier, prompt/schema,
+role, retry count, dollar policy, or $100 project ceiling. `PHASE4-LIVE-CANARY-V2` made one physical
+request, used 1,400 input tokens (1,280 cached), 524 output tokens including 384 reasoning tokens, and
+returned exactly two valid proposal items. Both were evaluated; one was a canonical/semantic duplicate,
+which remains charged behavior. The request completed without retry or uncertain usage.
+
+The corrected request reserved $0.00591025, reconciled to $0.00111 at normal published rates, and
+released $0.00480025. Across both canaries the ledger records $0.01158625 reserved = $0.00357 actual +
+$0 uncertain + $0.00801625 released, with no active reservation. The remaining balances are $0.24643
+canary, $29.99643 Phase 4, and $99.99643 project. Promotional credits are intentionally not deducted from
+these conservative ledger amounts; dashboard-export reconciliation remains unavailable.
+
+Provider-disabled replay made zero proposer/provider calls and reproduced deterministic summary hash
+`23bba3d953eec518c129e5a226ad3aa82167ac40638b69023720eb90dbf6d6cc`. The corrected record-only report
+is `artifacts/reports/PHASE4-LIVE-CANARY-V2/summary.json`, canonical SHA-256
+`5be29b06b2434b771a0301c92fbc66c399b71655403848bff5ac9464a461850f`.
+
+### Gate disposition
+
+| Gate | Evidence | Disposition |
+|---|---|---|
+| Provider-neutral strict proposer | scripted/OpenAI boundary plus schema, prompt, cache and leakage tests | Pass, no-cost |
+| Budget/cache/retry/cost reconciliation | integer price/usage, joint caps, concurrent/idempotent ledger, malformed retry, uncertain failure, pre-dispatch cost-cap tests | Pass, no-cost |
+| Resume, replay, frozen report | every request boundary plus mid-batch; replay disables provider/cache; report disables oracle | Pass, no-cost |
+| Matched A/B/C and H1/H2 analysis | strict registries, rotating blocks, clustered/sensitivity bootstrap, enforced Holm, negative/null/positive tests | Pass as machinery only |
+| Live canary and replay | corrected 2,048-token request returned two valid items; exact provider-disabled replay and ledger audit pass | Pass, live training evidence |
+| Development pilot/power review | v2 dry run: 60 children, 2,048 tokens/request, $9 child ceilings under $9.75, exact canary prerequisite verified, zero hidden/provider calls | Ready but not run; awaiting separate live authorization |
+| One-time locked test | pending declaration prohibits model/test access until pilot freeze | Blocked; test untouched |
+
+Final local verification covers 97 tests: the complete Phase 0-4 suite, the preserved 480-child Phase 3
+aggregate, Phase 4 boundary/leakage/accounting tests, Ruff formatting/lint, and strict mypy over 64
+source files. The stable fake run records 11 events and replays with zero proposer invocations; its
+deterministic summary hash is
+`0f8c1a6e48321bc2969437863a40b547d93c4bc5f65954a4a4f5f50019255a31`.
+
+### Reproduction commands
+
+```console
+uv sync --locked --dev
+uv run --locked ruff format --check .
+uv run --locked ruff check .
+uv run --locked mypy
+uv run --locked pytest
+
+uv run --locked wms solve --config configs/phase4-fake-smoke.yaml \
+  --proposer llm --run-id PHASE4-FAKE-SMOKE
+uv run --locked wms replay --run PHASE4-FAKE-SMOKE
+uv run --locked wms report --run PHASE4-FAKE-SMOKE \
+  --out artifacts/reports/PHASE4-FAKE-SMOKE
+uv run --locked wms benchmark --experiment experiments/phase4-fake-smoke.yaml
+uv run --locked wms benchmark \
+  --experiment experiments/phase4-primary-pilot.yaml --dry-run
+uv run --locked wms baseline random --config configs/phase4-fake-smoke.yaml --count 256
+```
+
+Evidence remains F0-only: binary radius-one elementary cellular automata under the small frozen DSL.
+F1/F2 were not backfilled. Phase 4 adds no cross-task memory, learned primitive, interestingness/UCB
+scheduler, active query, hidden state, scaffold mutation, or Phase 5-8 claim. Fake evidence establishes
+engineering reproducibility only—not broad discovery, transfer, model superiority, or H1/H2.

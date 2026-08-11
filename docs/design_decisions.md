@@ -378,3 +378,119 @@ reinterpret the already consumed validation result. Regression evidence now incl
 edges, elite/reserve/tie transitions against an independent reference model, forced invalid/no-op cap
 exhaustion, captured proposer-context leakage scans, and two independent executions of the complete
 480-child aggregate on development tasks. No locked child or validation aggregate was rerun or tuned.
+
+## DD-024 — Phase 4 provider boundary and pinned OpenAI contract
+
+The domain-facing interface is provider-neutral and immutable. `LLMProposer` owns public prompts,
+roles, batch validation, cache identity, canonical proposal conversion, and stateless semantics.
+Transport adapters own authentication, dispatch, error normalization, usage, and diagnostics. SDK types
+never enter search, persistence, replay, or analysis records.
+
+The live adapter is deliberately narrow: official `openai==2.53.0`, `v1/responses`, exact snapshot
+`gpt-5-mini-2025-08-07`, default service tier, low reasoning, strict JSON schema, `store=false`, and
+disabled truncation. On August 11, 2026, the official model page continued to list the snapshot and
+rates but labeled the snapshot deprecated. The two authorized training canaries established project
+access to the exact snapshot and accepted request fields, with no silent alias/substitution. The first
+512-token canary failed by output-cap exhaustion; the versioned 2,048-token correction returned a strict
+complete batch. The key is read only after both live opt-ins and never enters config, CLI text, hashes,
+logs, artifacts, reports, or sanitized exceptions.
+
+## DD-025 — Phase 4 prompts, feedback, batches, and lineage
+
+Direct prompt v1 contains only the public task/demonstrations, public DSL grammar/bounds, role, exact
+batch count, schema contract, and independence declaration. Iterative prompt v1 adds exactly one typed
+parent AST and its associated score-only record: ID, validity/totality, local errors/cases, exactness,
+AST bits, residual bits, and two-part bits. Runtime, error locations, counterexamples, rollout state,
+semantic hashes, internal family, paths, secrets, and history are structurally absent.
+
+One synchronous response contains several complete candidate documents. Envelope/item order is frozen.
+Root failures may consume one declared identical retry; item failures do not trigger repair. Valid items
+become `llm-direct-v1` or `llm-revision-v1` lineage and are evaluated directly. Canonicalization is
+allowed; Phase 3 mutation is not.
+
+## DD-026 — Cache, paid request state, and cumulative ledger
+
+Exact cache identity includes transport/model/endpoint/tier, exact rendered input, prompt/schema/role/
+batch/settings, and excludes secrets, time, paths, run/request IDs, and provider IDs. Entries carry a
+content hash and exact request key. Locked runs use a new experiment/run-scoped namespace.
+
+Request preparation and worst-case reservation commit before external dispatch. Immutable response or
+sanitized failure evidence is hashed before usage reconciliation. Items then commit in ordinal order
+with candidate, evaluation, transition, event, and budget. A durable responded batch resumes offline;
+a dispatched request without durable response becomes usage-uncertain instead of being duplicated.
+Reconciliation is idempotent only when the complete recorded usage/failure hash matches. Pending,
+post-dispatch, post-response, post-finalization, retry, and item boundaries are exercised explicitly.
+An unaffordable next reservation produces a replayable `cost-cap-exhausted` child before dispatch.
+
+The SQLite project ledger uses WAL and `BEGIN IMMEDIATE`, integer nano-USD, append-only usage records,
+and request/child/stage/Phase-4/project checks. `local_state/` is outside ordinary artifact cleanup. The
+OpenAI dashboard remains the external backstop if all local evidence is lost; local cost is a
+published-rate estimate rather than an invoice. Promotional or data-sharing token credits may reduce the
+provider invoice but do not reduce reservations, ledger estimates, or any scientific hard ceiling.
+
+## DD-027 — Matched A/B/C mechanisms and budgets
+
+A pays for seven shared initial candidates but never exposes them; each call is independent direct
+sampling. B selects the current incumbent and exposes its AST/score. C samples one occupied archive
+branch uniformly and uses that branch's primary parent; returned items enter independently computed
+cells in response order. B/C share the iterative prompt and exploit-only role. Existing incumbent,
+archive, rank, descriptor, reserve, and uniform scheduler behavior is reused without retuning Phase 3.
+
+All conditions share snapshot/endpoint/tier/settings, role facts, schema, batch, requests/tokens/items/
+oracle caps, initialization, score mode, continue-after-exact rule, and child ceiling. Intended
+differences are parent/feedback exposure and incumbent versus archive retention/branch selection.
+Invalids and duplicates are measured behavior, not grounds for unbounded refill.
+
+## DD-028 — Price/retry policy and live sequence
+
+`phase4-price-and-ceilings-v1` is the sole money authority. Rates are 250 nano-USD/token uncached input,
+25 cached input, and 2,000 output; reasoning is already in output. Ceiling increases require explicit
+user editing and may never exceed $30 Phase 4 or $100 project. Pilot v2 uses the policy's $0.15 maximum
+per development child and 60 children, so summed child ceilings remain $9.00 under the $9.75 stage cap.
+
+Retry v1 permits at most one identical retry for a rate-limit response with provider-established zero
+usage or a malformed envelope whose usage was recorded. Authentication, permission, invalid-request,
+timeout, connection, and server failures are not retried. Ambiguous usage is terminal and retains the
+full reservation. Paid work order is fake, training canary plus offline replay, development pilot plus
+power/cost review, complete freeze, then one locked test. The revised training canary passed; this
+handoff still stops before the development pilot.
+
+## DD-029 — Experiment inference, authority, and record-only artifact
+
+The pilot fixes ten opaque development IDs, two seeds, A/B/C, rotating condition blocks, 256 charged
+evaluations/child, all caps, H1=B-A, H2=C-B, descriptive C-A, normalized exact AUC, exact task/seed
+pairing, task-clustered primary bootstrap, task-seed sensitivity, 95% intervals, and Holm multiplicity.
+The reduction from four to two within-task seeds is a cost-feasibility correction: raising the output
+allowance and child ceiling while retaining 120 children would make summed child exposure exceed the
+$9.75 development cap. Ten independent task clusters are retained because tasks, not repeated seeds,
+are the primary bootstrap unit. Dry-run reads no hidden artifact/key and performs no write/provider call;
+pilot v2 also verifies the exact successful canary configuration and deterministic result hashes before
+declaring itself ready. If the benchmark process is interrupted, an existing hash-matched child without
+terminal results is resumed through the paid-request state machine rather than rejected or restarted.
+
+The test file is intentionally pending and non-executable. Test IDs/sample/seeds/budgets/cache cannot be
+frozen until pilot variance, power, validity, token, and cost evidence fits $20 locked and $30 Phase 4.
+`Phase4Authority.locked_test` is narrow and hash-bound for that future one-time run. Consumed Phase 3
+validation is not reused as confirmation; test outcomes remain unopened.
+
+Individual and aggregate artifacts are built from committed records only. They preserve negative/null/
+failure outcomes, cost/token curves, MDL/best-program sources, archive coverage separate from
+correctness, proposal/cache/retry diagnostics, lineage, runtime, access, contract hashes, raw pairs,
+and H1/H2 intervals. Fake evidence is labeled machinery-only.
+
+The two primary clustered bootstrap p-values are computed from centered task-cluster resamples. Holm's
+two-sided two-hypothesis procedure records adjusted p-values and sequential rejection decisions;
+`superiority_established` additionally requires a positive point estimate. Sensitivity intervals and
+the descriptive C-A comparison do not replace that primary decision rule.
+
+## DD-030 — Phase 4 scope and F0-only deviation
+
+The wider F1/F2 recommendation would require new task, oracle, DSL, and authority work. Phase 4 remains
+explicitly F0-only rather than smuggling new families into LLM integration. A target-blind deterministic
+random DSL proposer fills the missing contextual baseline while the enumerator and Phase 3 evidence stay
+intact.
+
+No cross-task memory/retrieval, language promotion, learned primitive, interestingness/UCB scheduler,
+active query, hidden-state model, scaffold modification, or Phase 5-8 mechanism is implemented. The
+256-semantics F0 universe and small grammar cannot establish broad discovery, transfer, or general LLM
+superiority.

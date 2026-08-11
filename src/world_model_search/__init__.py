@@ -1,4 +1,4 @@
-"""World Model Search through the Phase 3 deterministic archive-search baseline."""
+"""Oracle-grounded world-model search through the Phase 4 LLM experiment."""
 
 from world_model_search.domain.types import (
     Candidate,
@@ -17,4 +17,4 @@ __all__ = [
     "SplitLabel",
     "Task",
 ]
-__version__ = "0.3.0"
+__version__ = "0.4.0"

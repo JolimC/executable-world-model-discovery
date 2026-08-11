@@ -1,0 +1,70 @@
+schema_version: 4
+run:
+  root: artifacts/runs
+  seed: 20260811
+  task_id: d737b0ee219de6a676c139d1
+  split: training
+  condition_id: direct-llm-v1
+proposer:
+  id: llm
+  batch_size: 2
+oracle:
+  id: typed-elementary-exact-v1
+  response_mode: score-only
+dsl:
+  version: binary-ca-radius1-dsl-v1
+  max_depth: 8
+  max_nodes: 63
+  max_cases: 8
+  allowed_macros: [Parity, Majority]
+archive:
+  version: map-elites-lineage-reserve-v1
+  descriptor_version: public-probe-descriptor-v1
+  reserve_size: 2
+scheduler:
+  version: uniform-sorted-branches-v1
+initialization:
+  version: public-dsl-baselines-v1
+model:
+  backend: openai-responses-sdk-v1
+  provider: openai
+  resolved_model: gpt-5-mini-2025-08-07
+  endpoint: v1/responses
+  service_tier: default
+  reasoning_effort: low
+  max_output_tokens: 2048
+  store: false
+  truncation: disabled
+prompt:
+  direct_version: phase4-direct-public-task-v1
+  iterative_version: phase4-iterative-parent-score-v1
+  feedback_schema: phase4-parent-score-feedback-v1
+  batch_schema_version: 1
+  role_schedule_version: phase4-exploit-only-v1
+  role: exploit
+cache:
+  version: phase4-exact-response-cache-v1
+  root: artifacts/llm-cache
+  namespace: phase4-canary-output-2048-v2
+retry:
+  version: phase4-bounded-identical-retry-v1
+  max_retries: 1
+  backoff_milliseconds: [0]
+  retryable_categories: [rate-limit, malformed-response]
+  repair_policy: identical-request-no-conversation-v1
+budget:
+  version: phase4-joint-hard-limits-v1
+  model_request_cap: 2
+  input_token_cap: 50000
+  output_token_cap: 4096
+  total_token_cap: 54096
+  proposal_item_cap: 2
+  oracle_call_cap: 9
+  child_nano_usd_cap: 150000000
+phase4:
+  stage: canary
+  price_policy: configs/phase4-price-policy-v1.yaml
+  ledger: local_state/project-cost-ledger.sqlite3
+  analysis_version: phase4-paired-cluster-bootstrap-v1
+logging:
+  level: INFO

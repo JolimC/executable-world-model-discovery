@@ -44,6 +44,17 @@ from world_model_search.dsl.versions import (
 )
 from world_model_search.oracle.elementary import ROLLOUT_VERSION, SIMULATOR_VERSION
 from world_model_search.oracle.exact import EXACT_ORACLE_VERSION
+from world_model_search.phase4_versions import (
+    PHASE4_ANALYSIS_VERSION,
+    PHASE4_BUDGET_VERSION,
+    PHASE4_CANDIDATE_IDENTITY_VERSION,
+    PHASE4_DATABASE_SCHEMA_VERSION,
+    PHASE4_EVENT_SCHEMA_VERSION,
+    PHASE4_MANIFEST_SCHEMA_VERSION,
+    PHASE4_REQUEST_STATE_VERSION,
+    PHASE4_RESULTS_SCHEMA_VERSION,
+    PHASE4_RETRY_VERSION,
+)
 from world_model_search.serialization import JsonObject, derive_seed, sha256_bytes, to_json_value
 
 PHASE0_MANIFEST_SCHEMA_VERSION = 2
@@ -126,6 +137,7 @@ def build_manifest(
         1: PHASE0_MANIFEST_SCHEMA_VERSION,
         2: MANIFEST_SCHEMA_VERSION,
         3: PHASE3_MANIFEST_SCHEMA_VERSION,
+        4: PHASE4_MANIFEST_SCHEMA_VERSION,
     }[config.schema_version]
     versions: JsonObject = {
         "oracle": config.oracle.oracle_id,
@@ -190,6 +202,54 @@ def build_manifest(
             "proposal_artifact": PHASE3_PROPOSAL_ARTIFACT_VERSION,
             "artifact": "immutable-canonical-json-v1",
             "prompt": "not-applicable-no-language-model",
+        }
+    if config.schema_version == 4:
+        from world_model_search.model.cache import CACHE_VERSION
+        from world_model_search.model.policy import load_price_policy
+        from world_model_search.model.prompts import (
+            DIRECT_PROMPT_VERSION,
+            FEEDBACK_SCHEMA_VERSION,
+            ITERATIVE_PROMPT_VERSION,
+        )
+        from world_model_search.model.schema import BATCH_SCHEMA_VERSION
+        from world_model_search.proposer.llm import LLM_PROPOSER_VERSION
+
+        if config.phase4_policy is None:
+            raise AssertionError("Phase 4 manifest requires policy settings")
+        price_policy = load_price_policy(repository_root / config.phase4_policy.price_policy)
+        versions = {
+            "configuration_schema": 4,
+            "run_manifest_schema": PHASE4_MANIFEST_SCHEMA_VERSION,
+            "database_schema": PHASE4_DATABASE_SCHEMA_VERSION,
+            "event_schema": PHASE4_EVENT_SCHEMA_VERSION,
+            "results_schema": PHASE4_RESULTS_SCHEMA_VERSION,
+            "candidate_schema": CANDIDATE_SCHEMA_VERSION,
+            "candidate_identity": PHASE4_CANDIDATE_IDENTITY_VERSION,
+            "dsl": DSL_VERSION,
+            "canonicalizer": CANONICALIZER_VERSION,
+            "interpreter": INTERPRETER_VERSION,
+            "semantic_hash": SEMANTIC_HASH_VERSION,
+            "coding_scheme": PREFIX_CODE_VERSION,
+            "residual_code": RESIDUAL_CODE_VERSION,
+            "rank": RANK_VERSION,
+            "oracle": EXACT_ORACLE_VERSION,
+            "simulator": SIMULATOR_VERSION,
+            "rollout": ROLLOUT_VERSION,
+            "proposer": LLM_PROPOSER_VERSION,
+            "direct_prompt": DIRECT_PROMPT_VERSION,
+            "iterative_prompt": ITERATIVE_PROMPT_VERSION,
+            "feedback_schema": FEEDBACK_SCHEMA_VERSION,
+            "batch_schema": BATCH_SCHEMA_VERSION,
+            "cache": CACHE_VERSION,
+            "retry": PHASE4_RETRY_VERSION,
+            "request_state": PHASE4_REQUEST_STATE_VERSION,
+            "budget": PHASE4_BUDGET_VERSION,
+            "analysis": PHASE4_ANALYSIS_VERSION,
+            "archive": PHASE3_ARCHIVE_VERSION,
+            "descriptor": PHASE3_DESCRIPTOR_VERSION,
+            "scheduler": PHASE3_SCHEDULER_VERSION,
+            "initialization": PHASE3_INITIALIZATION_VERSION,
+            "price_policy": price_policy.policy_version,
         }
     raw = {
         "manifest_schema_version": manifest_schema,
@@ -329,6 +389,76 @@ def build_manifest(
             "active_queries_enabled": False,
             "cross_task_memory": False,
             "test_task_outcomes_accessed": False,
+        }
+    if config.schema_version == 4:
+        from world_model_search.model.policy import load_price_policy
+
+        if (
+            config.dsl is None
+            or config.archive is None
+            or config.scheduler is None
+            or config.initialization is None
+            or config.model is None
+            or config.prompt is None
+            or config.cache is None
+            or config.retry is None
+            or config.phase4_budget is None
+            or config.phase4_policy is None
+        ):
+            raise AssertionError("Phase 4 manifest requires complete settings")
+        price_policy = load_price_policy(repository_root / config.phase4_policy.price_policy)
+        raw["proposer"] = {
+            "identifier": "llm",
+            "backend": config.model.backend_id,
+            "provider": config.model.provider_id,
+            "model": config.model.resolved_model,
+            "endpoint": config.model.endpoint,
+            "service_tier": config.model.service_tier,
+            "decoding_settings": config.model.request_settings(),
+        }
+        raw["bounds"] = {
+            "dsl": {
+                "max_depth": config.dsl.max_depth,
+                "max_nodes": config.dsl.max_nodes,
+                "max_cases": config.dsl.max_cases,
+                "allowed_macros": config.dsl.allowed_macros,
+            },
+            "batch_size": config.proposer.batch_size,
+            "archive_reserve_size": config.archive.reserve_size,
+        }
+        raw["budget"] = {
+            "version": config.phase4_budget.budget_version,
+            "model_requests": config.phase4_budget.model_request_cap,
+            "input_tokens": config.phase4_budget.input_token_cap,
+            "output_tokens": config.phase4_budget.output_token_cap,
+            "total_tokens": config.phase4_budget.total_token_cap,
+            "proposal_items": config.phase4_budget.proposal_item_cap,
+            "oracle_calls": config.phase4_budget.oracle_call_cap,
+            "child_nano_usd": config.phase4_budget.child_nano_usd_cap,
+            "price_policy_path": str(config.phase4_policy.price_policy),
+            "price_policy_hash": price_policy.content_hash,
+            "price_entry": price_policy.to_value()["price"],
+            "project_lifetime_nano_usd": price_policy.project_lifetime_cap_nano_usd,
+            "phase4_nano_usd": price_policy.phase4_cap_nano_usd,
+            "stage": config.phase4_policy.stage,
+        }
+        raw["protocol"] = {
+            "condition_id": config.run.condition_id,
+            "conditions": {
+                "A": "independent-direct-complete-AST-samples",
+                "B": "single-incumbent-parent-and-score-revision",
+                "C": "uniform-archive-cell-parent-and-score-revision",
+            },
+            "shared_initialization": PHASE3_INITIALIZATION_VERSION,
+            "role": config.prompt.role,
+            "response_mode": "complete-AST-batch",
+            "oracle_feedback": "score-only-parent-associated-v1",
+            "direct_prompt_exposes_initialization": False,
+            "stateless_provider_calls": True,
+            "active_queries_enabled": False,
+            "cross_task_memory": False,
+            "test_task_outcomes_accessed": False,
+            "f0_only": True,
         }
     value = to_json_value(raw)
     if not isinstance(value, dict):  # pragma: no cover - mapping invariant

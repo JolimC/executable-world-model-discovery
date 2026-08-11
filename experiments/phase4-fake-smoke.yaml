@@ -1,0 +1,52 @@
+experiment_schema_version: 2
+experiment_id: phase4-fake-smoke-v1
+status: fake-lifecycle
+base_config: configs/phase4-fake-smoke.yaml
+output_root: artifacts/experiments/phase4-fake-smoke-v1
+child_runs_root: artifacts/phase4-runs/phase4-fake-smoke-v1
+report_root: artifacts/reports/phase4-fake-smoke-v1
+prerequisite_canary: null
+conditions: [direct-llm-v1, single-incumbent-v1, uniform-diverse-archive-v1]
+condition_execution:
+  policy: deterministic-rotating-block-by-task-seed-v1
+  base_order: [direct-llm-v1, single-incumbent-v1, uniform-diverse-archive-v1]
+task_selection:
+  split: training
+  policy: opaque-public-id-fixed-v1
+  task_ids: [d737b0ee219de6a676c139d1]
+search_seeds: [41001]
+matched_contract:
+  model: gpt-5-mini-2025-08-07
+  endpoint: v1/responses
+  service_tier: default
+  reasoning_effort: low
+  batch_size: 2
+  model_request_cap: 2
+  input_token_cap: 50000
+  output_token_cap: 2048
+  total_token_cap: 52048
+  proposal_item_cap: 4
+  oracle_call_cap: 11
+  role: exploit
+  response_mode: score-only
+  initialization: seven-shared-charged-public-candidates-v1
+  continue_after_first_exact: true
+hypotheses:
+  H1: single-incumbent-v1-minus-direct-llm-v1
+  H2: uniform-diverse-archive-v1-minus-single-incumbent-v1
+  secondary: uniform-diverse-archive-v1-minus-direct-llm-v1
+analysis:
+  primary_endpoint: normalized-exact-solve-auc-v1
+  pairing: exact-task-id-and-search-seed-v1
+  primary_bootstrap: task-clustered-v1
+  sensitivity_bootstrap: task-seed-pair-v1
+  bootstrap_seed: 42001
+  bootstrap_replicates: 2000
+  confidence_level: 95
+  multiplicity: holm-two-sided-two-hypotheses-v1
+spending:
+  stage: fake
+  price_policy: configs/phase4-price-policy-v1.yaml
+  child_nano_usd_cap: 0
+  aggregate_nano_usd_cap: 0
+phase_boundary: phase4-no-memory-no-interestingness-no-active-query-v1

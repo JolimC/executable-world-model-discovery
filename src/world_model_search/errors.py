@@ -13,6 +13,10 @@ class PersistenceError(WorldModelSearchError):
     """Raised when recorded run data is missing, inconsistent, or unsafe."""
 
 
+class BudgetExhaustedError(PersistenceError):
+    """Raised when a prospective action cannot fit a frozen hard ceiling."""
+
+
 class ReplayError(WorldModelSearchError):
     """Raised when deterministic replay diverges from recorded data."""
 

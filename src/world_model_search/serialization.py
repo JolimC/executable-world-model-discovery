@@ -89,7 +89,10 @@ def derive_seed(master_seed: int, namespace: str) -> int:
 def parse_json_object(data: str) -> JsonObject:
     """Parse JSON while requiring an object at the root."""
 
-    value: object = json.loads(data)
+    def reject_constant(value: str) -> object:
+        raise ValueError(f"non-finite JSON number is forbidden: {value}")
+
+    value: object = json.loads(data, parse_constant=reject_constant)
     if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
         raise ValueError("expected a JSON object")
     return value

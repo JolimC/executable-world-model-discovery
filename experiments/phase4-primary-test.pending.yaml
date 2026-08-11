@@ -1,0 +1,8 @@
+# Deliberately not executable and not a schema-2 registry. The one-time test task IDs,
+# sample size, seeds, and cache namespace may be frozen only after live pilot variance,
+# power, validity, token, and cost evidence pass the declared $20/$30 gates.
+status: blocked-awaiting-development-pilot
+test_oracle_access_permitted: false
+model_calls_permitted: false
+reason: revised live canary passed; development pilot and power/cost freeze are not completed
+required_freeze: code-lock-price-ledger-model-prompt-schema-registry-analysis-report-v1

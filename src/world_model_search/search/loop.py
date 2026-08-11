@@ -40,6 +40,7 @@ from world_model_search.persistence.manifest import (
     build_manifest,
     utc_now,
 )
+from world_model_search.phase4_versions import PHASE4_MANIFEST_SCHEMA_VERSION
 from world_model_search.proposer.enumerative import (
     EnumeratedProgram,
     EnumerationBounds,
@@ -117,11 +118,13 @@ def load_manifest(run_directory: Path) -> JsonObject:
         PHASE0_MANIFEST_SCHEMA_VERSION,
         MANIFEST_SCHEMA_VERSION,
         PHASE3_MANIFEST_SCHEMA_VERSION,
+        PHASE4_MANIFEST_SCHEMA_VERSION,
     }:
         raise PersistenceError(
             f"unsupported run manifest schema {recorded_schema!r}; "
             f"this build requires schema {PHASE0_MANIFEST_SCHEMA_VERSION} or "
-            f"{MANIFEST_SCHEMA_VERSION}, or {PHASE3_MANIFEST_SCHEMA_VERSION}"
+            f"{MANIFEST_SCHEMA_VERSION}, {PHASE3_MANIFEST_SCHEMA_VERSION}, or "
+            f"{PHASE4_MANIFEST_SCHEMA_VERSION}"
         )
     return raw
 
@@ -603,10 +606,22 @@ def start_run(
     config_source: str,
     run_id: str | None = None,
     interrupt_after: int | None = None,
+    allow_live_model: bool = False,
 ) -> RunOutcome:
     """Create a fully validated run and execute it."""
 
     selected_run_id = validate_run_id(run_id or generate_run_id(config))
+    if config.schema_version == 4:
+        from world_model_search.search.phase4 import start_phase4_run
+
+        return start_phase4_run(
+            repository_root=repository_root,
+            config=config,
+            config_source=config_source,
+            run_id=selected_run_id,
+            interrupt_after=interrupt_after,
+            allow_live_model=allow_live_model,
+        )  # type: ignore[return-value]
     if config.schema_version == 3:
         from world_model_search.search.phase3 import start_phase3_run
 
@@ -670,6 +685,7 @@ def resume_run(
     runs_root: Path,
     run_id: str,
     interrupt_after: int | None = None,
+    allow_live_model: bool = False,
 ) -> RunOutcome:
     validate_run_id(run_id)
     if runs_root.is_absolute() or ".." in runs_root.parts:
@@ -679,6 +695,17 @@ def resume_run(
     config = _manifest_config(manifest)
     if config.run.root != runs_root:
         raise PersistenceError("recorded run root does not match --runs-root")
+    if config.schema_version == 4:
+        from world_model_search.search.phase4 import resume_phase4_run
+
+        return resume_phase4_run(
+            repository_root=repository_root,
+            run_directory=run_directory,
+            config=config,
+            manifest=manifest,
+            interrupt_after=interrupt_after,
+            allow_live_model=allow_live_model,
+        )  # type: ignore[return-value]
     if config.schema_version == 3:
         from world_model_search.search.phase3 import resume_phase3_run
 

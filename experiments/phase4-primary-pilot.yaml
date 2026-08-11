@@ -1,0 +1,67 @@
+experiment_schema_version: 2
+experiment_id: phase4-primary-pilot-v2
+status: development-pilot
+base_config: configs/phase4-openai-pilot.yaml
+output_root: artifacts/experiments/phase4-primary-pilot-v2
+child_runs_root: artifacts/phase4-runs/phase4-primary-pilot-v2
+report_root: artifacts/reports/phase4-primary-pilot-v2
+prerequisite_canary:
+  run_directory: artifacts/runs/PHASE4-LIVE-CANARY-V2
+  run_id: PHASE4-LIVE-CANARY-V2
+  configuration_hash: 6448616811b3f8a6a0d872aec68424148832951247eb55a8e8aaf5ed2a7d4897
+  deterministic_summary_hash: 23bba3d953eec518c129e5a226ad3aa82167ac40638b69023720eb90dbf6d6cc
+  minimum_valid_items: 2
+conditions: [direct-llm-v1, single-incumbent-v1, uniform-diverse-archive-v1]
+condition_execution:
+  policy: deterministic-rotating-block-by-task-seed-v1
+  base_order: [direct-llm-v1, single-incumbent-v1, uniform-diverse-archive-v1]
+task_selection:
+  split: development
+  policy: opaque-public-id-fixed-v1
+  task_ids:
+    - 01dda10a838f4423e72b90b8
+    - 01fa64a668ef5086dc713454
+    - 0bcf2a466f9f62472b0604d7
+    - 1400d05ad196c9fa802cd094
+    - 1cddb7fea9c43ce8b5f93584
+    - 23582946627e0949dc02e473
+    - 23abc8920b7d2ea2bb1bf9cf
+    - 2b41ea8918fa2be0a0389e8c
+    - 2e323a2b94479b332489f218
+    - 30bccf698deb8ce78d0fef77
+search_seeds: [41001, 41002]
+matched_contract:
+  model: gpt-5-mini-2025-08-07
+  endpoint: v1/responses
+  service_tier: default
+  reasoning_effort: low
+  batch_size: 4
+  model_request_cap: 126
+  input_token_cap: 2000000
+  output_token_cap: 258048
+  total_token_cap: 2258048
+  proposal_item_cap: 249
+  oracle_call_cap: 256
+  role: exploit
+  response_mode: score-only
+  initialization: seven-shared-charged-public-candidates-v1
+  continue_after_first_exact: true
+hypotheses:
+  H1: single-incumbent-v1-minus-direct-llm-v1
+  H2: uniform-diverse-archive-v1-minus-single-incumbent-v1
+  secondary: uniform-diverse-archive-v1-minus-direct-llm-v1
+analysis:
+  primary_endpoint: normalized-exact-solve-auc-v1
+  pairing: exact-task-id-and-search-seed-v1
+  primary_bootstrap: task-clustered-v1
+  sensitivity_bootstrap: task-seed-pair-v1
+  bootstrap_seed: 42001
+  bootstrap_replicates: 10000
+  confidence_level: 95
+  multiplicity: holm-two-sided-two-hypotheses-v1
+spending:
+  stage: pilot
+  price_policy: configs/phase4-price-policy-v1.yaml
+  child_nano_usd_cap: 150000000
+  aggregate_nano_usd_cap: 9750000000
+phase_boundary: phase4-no-memory-no-interestingness-no-active-query-v1

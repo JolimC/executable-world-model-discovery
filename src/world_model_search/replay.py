@@ -17,7 +17,7 @@ from world_model_search.domain.types import (
     SearchEvent,
     SplitLabel,
 )
-from world_model_search.dsl.ast import AstLimits
+from world_model_search.dsl.ast import AstLimits, BitExpr
 from world_model_search.dsl.canonicalize import canonicalize
 from world_model_search.dsl.codec import encoded_length
 from world_model_search.dsl.interpreter import semantic_hash
@@ -27,7 +27,7 @@ from world_model_search.dsl.json_schema import (
     ast_to_value,
 )
 from world_model_search.dsl.versions import PREFIX_CODE_VERSION
-from world_model_search.errors import ConfigurationError, ReplayError
+from world_model_search.errors import ConfigurationError, PersistenceError, ReplayError
 from world_model_search.oracle.exact import ExactDslOracle
 from world_model_search.oracle.mock import MockOracle
 from world_model_search.persistence.artifacts import read_text_artifact
@@ -85,6 +85,14 @@ def replay_run(*, repository_root: Path, runs_root: Path, run_id: str) -> Replay
     config = _config_from_manifest(manifest)
     if config.run.root != runs_root:
         raise ReplayError("manifest run root does not match --runs-root")
+    if config.schema_version == 4:
+        return _replay_phase4(
+            repository_root=repository_root,
+            run_directory=run_directory,
+            run_id=run_id,
+            config=config,
+            manifest=manifest,
+        )
     if config.schema_version == 2:
         return _replay_phase2(
             repository_root=repository_root,
@@ -199,6 +207,307 @@ def replay_run(*, repository_root: Path, runs_root: Path, run_id: str) -> Replay
         event_count=len(events),
         event_payload_hashes=tuple(event.payload_hash for event in events),
         deterministic_summary_hash=summary_hash,
+    )
+
+
+def _replay_phase4(
+    *,
+    repository_root: Path,
+    run_directory: Path,
+    run_id: str,
+    config: AppConfig,
+    manifest: JsonObject,
+) -> ReplayReport:
+    """Replay Phase 4 from immutable request/response records with no provider or cache."""
+
+    from world_model_search.domain.types import ProposalRole
+    from world_model_search.model.prompts import ParentScoreFeedback, render_prompt
+    from world_model_search.model.schema import (
+        BATCH_SCHEMA_NAME,
+        BATCH_SCHEMA_VERSION,
+        BatchEnvelopeError,
+        candidate_batch_json_schema,
+        parse_candidate_batch,
+    )
+    from world_model_search.model.types import ModelError, ModelRequest
+    from world_model_search.persistence.phase4_database import Phase4Database
+    from world_model_search.phase4_versions import PHASE4_MANIFEST_SCHEMA_VERSION
+    from world_model_search.search.phase4 import (
+        _candidate_from_row,
+        _event_payload,
+        _feedback,
+        _mechanism,
+        _request_from_artifact,
+        _response_from_artifact,
+        _result_from_json,
+        authority_from_manifest,
+        phase4_results,
+        prepare_phase4,
+    )
+    from world_model_search.search.phase4_types import Phase4BudgetState, phase4_candidate
+
+    if manifest.get("manifest_schema_version") != PHASE4_MANIFEST_SCHEMA_VERSION:
+        raise ReplayError("Phase 4 manifest schema mismatch")
+    if config.dsl is None or config.model is None:
+        raise ReplayError("Phase 4 replay requires frozen DSL/model settings")
+    try:
+        prepared = prepare_phase4(
+            repository_root=repository_root,
+            config=config,
+            authority=authority_from_manifest(manifest),
+            purpose="phase4-recorded-replay",
+        )
+    except (ConfigurationError, PersistenceError, ValueError) as exc:
+        raise ReplayError(f"Phase 4 replay authority failed: {exc}") from exc
+    mechanism = _mechanism(config, prepared.task)
+    oracle = ExactDslOracle(
+        prepared.hidden,
+        limits=prepared.limits,
+        response_mode=config.oracle.response_mode,
+    )
+    with Phase4Database(run_directory / "run.sqlite3", read_only=True) as database:
+        recorded_status = database.state().status
+        if recorded_status not in {
+            "completed",
+            "cost-cap-exhausted",
+            "usage-uncertain",
+            "failed",
+        }:
+            raise ReplayError("Phase 4 replay requires a terminal recorded run")
+        request_rows = tuple(dict(row) for row in database.requests())
+        item_rows = {
+            (int(row["request_index"]), int(row["ordinal"])): dict(row) for row in database.items()
+        }
+        candidate_rows = {str(row["candidate_id"]): row for row in database.candidates()}
+        evaluation_rows = {int(row["evaluation_index"]): row for row in database.evaluations()}
+        transition_rows = {int(row["evaluation_index"]): row for row in database.transitions()}
+        candidates: dict[str, Candidate] = {}
+
+        # Recreate every fixed prompt/request and validate every submitted response item.
+        for row in request_rows:
+            request_index = int(row["request_index"])
+            prompt_name = Path(str(row["prompt_artifact"]))
+            request_name = Path(str(row["request_artifact"]))
+            if any(
+                path.is_absolute() or ".." in path.parts for path in (prompt_name, request_name)
+            ):
+                raise ReplayError("Phase 4 request path escapes its run")
+            prompt_text = read_text_artifact(run_directory / prompt_name)
+            if sha256_text(prompt_text) != row["prompt_hash"]:
+                raise ReplayError(f"Phase 4 prompt {request_index} hash mismatch")
+            request_artifact = parse_json_object(read_text_artifact(run_directory / request_name))
+            try:
+                recorded_request = _request_from_artifact(
+                    request_artifact, expected_hash=row["request_hash"]
+                )
+            except PersistenceError as exc:
+                raise ReplayError(f"Phase 4 request {request_index} is corrupt: {exc}") from exc
+            if recorded_request.rendered_input != prompt_text:
+                raise ReplayError(f"Phase 4 request {request_index} identity mismatch")
+            parent_ids_raw: object = json.loads(str(row["ordered_parent_ids_json"]))
+            parent_ids = _string_list(parent_ids_raw, "Phase 4 ordered parent IDs")
+            parent = None
+            feedback: ParentScoreFeedback | None = None
+            if parent_ids:
+                if len(parent_ids) != 1:
+                    raise ReplayError("Phase 4 iterative request must have one primary parent")
+                parent_candidate = _candidate_from_row(
+                    candidate_rows[parent_ids[0]], prepared.limits
+                )
+                parent = CandidateSummary(parent_candidate.candidate_id, parent_candidate.ast)
+                parent_result = _result_from_json(
+                    str(database.candidate_result(parent_candidate.candidate_id)["result_json"])
+                )
+                feedback = _feedback(parent_candidate.candidate_id, parent_result)
+            role = ProposalRole(str(row["role"]))
+            template, version, rendered = render_prompt(
+                task=prepared.task.public_view(),
+                role=role,
+                requested_batch_size=int(row["batch_size"]),
+                parent=parent,
+                feedback=feedback,
+            )
+            settings = config.model.request_settings()
+            settings["independent_sample_index"] = int(row["logical_call_index"])
+            rebuilt_request = ModelRequest(
+                backend_id=str(row["backend_id"]),
+                provider_id=str(row["provider_id"]),
+                resolved_model=config.model.resolved_model,
+                endpoint=config.model.endpoint,
+                service_tier=config.model.service_tier,
+                prompt_template=template,
+                prompt_version=version,
+                rendered_input=rendered,
+                structured_schema_name=BATCH_SCHEMA_NAME,
+                structured_schema_version=BATCH_SCHEMA_VERSION,
+                structured_schema=candidate_batch_json_schema(
+                    role=role, batch_size=int(row["batch_size"])
+                ),
+                role=role,
+                requested_batch_size=int(row["batch_size"]),
+                settings=settings,
+            )
+            if rebuilt_request.request_hash != recorded_request.request_hash:
+                raise ReplayError(f"Phase 4 request {request_index} prompt reconstruction diverged")
+            response_name_value = row.get("response_artifact")
+            if response_name_value is None:
+                if row["state"] not in {"failed", "usage-uncertain"}:
+                    raise ReplayError("Phase 4 response-free request has an invalid state")
+                continue
+            response_name = Path(str(response_name_value))
+            if response_name.is_absolute() or ".." in response_name.parts:
+                raise ReplayError("Phase 4 response path escapes its run")
+            response_text = read_text_artifact(run_directory / response_name)
+            if sha256_text(response_text) != row["response_hash"]:
+                raise ReplayError(f"Phase 4 response {request_index} hash mismatch")
+            response_artifact = parse_json_object(response_text)
+            if row["state"] in {"failed", "usage-uncertain"}:
+                try:
+                    failure_error = ModelError.from_value(response_artifact.get("error"))
+                except ValueError as exc:
+                    raise ReplayError("Phase 4 failure artifact is malformed") from exc
+                if (
+                    set(response_artifact) != {"artifact_version", "request_index", "error"}
+                    or response_artifact.get("artifact_version") != "phase4-model-failure-v1"
+                    or response_artifact.get("request_index") != request_index
+                    or canonical_json(failure_error.to_value()) != row["error_json"]
+                ):
+                    raise ReplayError("Phase 4 failure artifact diverged")
+                continue
+            try:
+                response = _response_from_artifact(response_artifact, request=recorded_request)
+            except PersistenceError as exc:
+                raise ReplayError(f"Phase 4 response {request_index} is corrupt: {exc}") from exc
+            if response.request_hash != rebuilt_request.request_hash:
+                raise ReplayError("Phase 4 response/request identity mismatch")
+            try:
+                batch = parse_candidate_batch(
+                    response.raw_text,
+                    expected_role=role,
+                    requested_batch_size=int(row["batch_size"]),
+                    limits=prepared.limits,
+                    allowed_macros=frozenset(config.dsl.allowed_macros),
+                )
+            except BatchEnvelopeError:
+                if row["state"] != "schema-failure":
+                    raise ReplayError("unrecorded Phase 4 response schema failure") from None
+                continue
+            if row["state"] not in {"responded", "completed"}:
+                raise ReplayError("valid Phase 4 response has an invalid lifecycle state")
+            for item in batch.items:
+                persisted = item_rows.get((request_index, item.ordinal))
+                if persisted is None:
+                    raise ReplayError("Phase 4 response item is missing")
+                expected_status = "accepted" if item.accepted else "rejected"
+                if persisted["outcome"] != expected_status:
+                    raise ReplayError("Phase 4 item validation outcome diverged")
+                submitted = (
+                    canonical_json(item.submitted_document)
+                    if item.submitted_document is not None
+                    else None
+                )
+                if persisted["submitted_document_json"] != submitted:
+                    raise ReplayError("Phase 4 submitted item artifact diverged")
+
+        rebuilt_events: list[SearchEvent] = []
+        for sequence, event in enumerate(database.events()):
+            if event.sequence != sequence or sha256_text(event.payload_json) != event.payload_hash:
+                raise ReplayError("Phase 4 event sequence/hash diverged")
+            payload = event.payload
+            try:
+                event_budget = Phase4BudgetState.from_value(payload.get("budget"))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ReplayError("Phase 4 event budget is invalid") from exc
+            evaluation_index = payload.get("evaluation_index")
+            event_request_index = payload.get("request_index")
+            item_ordinal = payload.get("item_ordinal")
+            candidate_value = payload.get("candidate")
+            rebuilt_candidate: Candidate | None = None
+            rebuilt_result: OracleResult | None = None
+            rebuilt_decision = None
+            rejection = payload.get("rejection_reason")
+            if isinstance(evaluation_index, int) and isinstance(candidate_value, dict):
+                evaluation = evaluation_rows.get(evaluation_index)
+                if evaluation is None:
+                    raise ReplayError("Phase 4 event evaluation is missing")
+                candidate_id = candidate_value.get("candidate_id")
+                if not isinstance(candidate_id, str) or candidate_id not in candidate_rows:
+                    raise ReplayError("Phase 4 event candidate is missing")
+                stored = _candidate_from_row(candidate_rows[candidate_id], prepared.limits)
+                if not isinstance(stored.ast, BitExpr) or stored.semantic_hash is None:
+                    raise ReplayError("Phase 4 candidate is not a typed DSL candidate")
+                rebuilt_candidate = phase4_candidate(
+                    task_id=stored.task_id,
+                    ast=stored.ast,
+                    parent_ids=stored.parent_ids,
+                    operator_id=stored.operator_id,
+                    context_hash=stored.context_hash,
+                    payload_hash=stored.payload_hash,
+                    semantic_hash=semantic_hash(stored.ast, limits=prepared.limits),
+                )
+                if rebuilt_candidate.candidate_id != stored.candidate_id:
+                    raise ReplayError("Phase 4 candidate identity diverged")
+                rebuilt_result = oracle.evaluate(stored.ast).result
+                if rebuilt_result.deterministic_payload() != payload.get("oracle_result"):
+                    raise ReplayError("Phase 4 exact oracle replay diverged")
+                rebuilt_decision = mechanism.insert(rebuilt_candidate, rebuilt_result)
+                transition = transition_rows.get(evaluation_index)
+                if transition is None or transition["decision_json"] != canonical_json(
+                    rebuilt_decision.to_value()
+                ):
+                    raise ReplayError("Phase 4 archive/incumbent transition diverged")
+                candidates[stored.candidate_id] = stored
+            elif candidate_value is not None or not isinstance(rejection, str):
+                raise ReplayError("Phase 4 candidate-free event is malformed")
+            rebuilt_payload = _event_payload(
+                evaluation_index=evaluation_index if isinstance(evaluation_index, int) else None,
+                request_index=(
+                    event_request_index if isinstance(event_request_index, int) else None
+                ),
+                item_ordinal=item_ordinal if isinstance(item_ordinal, int) else None,
+                candidate=rebuilt_candidate,
+                result=rebuilt_result,
+                decision=rebuilt_decision,
+                rejection_reason=rejection if isinstance(rejection, str) else None,
+                budget=event_budget,
+            )
+            rebuilt = SearchEvent.create(
+                sequence=sequence,
+                event_type=event.event_type,
+                logical_cost=event.logical_cost,
+                payload=rebuilt_payload,
+                audit_timestamp=event.audit_timestamp,
+            )
+            if (
+                rebuilt.payload_json != event.payload_json
+                or rebuilt.payload_hash != event.payload_hash
+            ):
+                raise ReplayError("Phase 4 deterministic event replay diverged")
+            rebuilt_events.append(rebuilt)
+
+        final_budget = database.budget()
+        rebuilt_results = phase4_results(
+            database=database,
+            budget=final_budget,
+            mechanism=mechanism,
+            config=config,
+            status=recorded_status,
+        )
+    analysis_manifest = read_text_artifact(run_directory / "analysis" / "manifest.json")
+    rebuilt_results["analysis_manifest_hash"] = sha256_text(analysis_manifest)
+    rebuilt_results["deterministic_summary_hash"] = sha256_json(rebuilt_results)
+    recorded_results = parse_json_object(read_text_artifact(run_directory / "results.json"))
+    if canonical_json(rebuilt_results) != canonical_json(recorded_results):
+        raise ReplayError("Phase 4 frozen results replay diverged")
+    summary_hash = rebuilt_results.get("deterministic_summary_hash")
+    if not isinstance(summary_hash, str):
+        raise ReplayError("Phase 4 deterministic summary hash is malformed")
+    return ReplayReport(
+        run_id=run_id,
+        event_count=len(rebuilt_events),
+        event_payload_hashes=tuple(event.payload_hash for event in rebuilt_events),
+        deterministic_summary_hash=summary_hash,
+        proposer_invocations=0,
     )
 
 

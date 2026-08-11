@@ -6,5 +6,6 @@
 /.pytest_cache/
 /.ruff_cache/
 /artifacts/
+/local_state/
 __pycache__/
 *.py[cod]

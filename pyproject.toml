@@ -4,13 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "world-model-search"
-version = "0.3.0"
+version = "0.4.0"
 description = "Oracle-grounded executable world-model discovery research shell"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { file = "LICENSE" }
 authors = [{ name = "World Model Search contributors" }]
 dependencies = [
+  "openai==2.53.0",
   "PyYAML==6.0.2",
 ]
 
