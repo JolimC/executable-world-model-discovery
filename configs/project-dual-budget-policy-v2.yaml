@@ -1,0 +1,33 @@
+policy_version: published-rate-and-reconciled-cash-v2
+currency_unit: nano-USD
+opening_published_rate_nano_usd: 6526807550
+published_exposure_ceilings_nano_usd:
+  phase4: 30000000000
+  canary: 250000000
+  development_pilot: 9750000000
+  locked_test: 20000000000
+  one_request: 10000000
+  pilot_child: 150000000
+  locked_child: 500000000
+cash_budget:
+  budget_version: reconciled-cash-plus-unreconciled-published-v1
+  personal_lifetime_nano_usd: 100000000000
+  safety_buffer_nano_usd: 0
+  opening_reconciliation:
+    billed_nano_usd: 4650000000
+    covered_published_nano_usd: 6526807550
+    observed_at: "2026-08-11"
+    scope: OpenAI project dashboard after the completed Phase 4 pilot; exact observation time unavailable
+    source: user-reported-provider-dashboard
+    verification: user-reported-unverified
+price:
+  provider: openai
+  model: gpt-5-mini-2025-08-07
+  endpoint: v1/responses
+  service_tier: default
+  uncached_input_nano_usd_per_token: 250
+  cached_input_nano_usd_per_token: 25
+  output_nano_usd_per_token: 2000
+  provider_call_fee_nano_usd: 0
+  source_url: https://developers.openai.com/api/docs/models/gpt-5-mini
+  verified_at: "2026-08-11T00:11:55-05:00"

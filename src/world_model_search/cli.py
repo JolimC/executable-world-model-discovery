@@ -30,7 +30,7 @@ from world_model_search.evaluation.phase4_experiment import (
 from world_model_search.evaluation.random_baseline import run_random_baseline
 from world_model_search.evaluation.report import create_recorded_report
 from world_model_search.logging import configure_logging
-from world_model_search.model.ledger import rebuild_project_ledger
+from world_model_search.model.ledger import ProjectLedger, rebuild_project_ledger
 from world_model_search.model.policy import load_price_policy
 from world_model_search.oracle.exact import ExactDslOracle
 from world_model_search.persistence.artifacts import read_text_artifact
@@ -116,11 +116,67 @@ def _parser() -> argparse.ArgumentParser:
     rebuild.add_argument(
         "--ledger", type=Path, default=Path("local_state/project-cost-ledger.sqlite3")
     )
+    ledger_status = ledger_commands.add_parser(
+        "status", help="show published-rate and reconciled-cash budget status"
+    )
+    ledger_status.add_argument(
+        "--policy", type=Path, default=Path("configs/project-dual-budget-policy-v2.yaml")
+    )
+    ledger_status.add_argument(
+        "--ledger", type=Path, default=Path("local_state/project-dual-budget-ledger.sqlite3")
+    )
+    cash_history = ledger_commands.add_parser(
+        "cash-history", help="show append-only provider cash checkpoints"
+    )
+    cash_history.add_argument(
+        "--policy", type=Path, default=Path("configs/project-dual-budget-policy-v2.yaml")
+    )
+    cash_history.add_argument(
+        "--ledger", type=Path, default=Path("local_state/project-dual-budget-ledger.sqlite3")
+    )
+    cash = ledger_commands.add_parser(
+        "reconcile-cash", help="append a provider-billed cash checkpoint"
+    )
+    cash.add_argument(
+        "--policy", type=Path, default=Path("configs/project-dual-budget-policy-v2.yaml")
+    )
+    cash.add_argument(
+        "--ledger", type=Path, default=Path("local_state/project-dual-budget-ledger.sqlite3")
+    )
+    cash.add_argument("--billed-usd", required=True)
+    cash.add_argument("--observed-at", required=True)
+    cash.add_argument("--scope", required=True)
+    cash.add_argument("--source", default="user-reported-provider-dashboard")
+    cash.add_argument(
+        "--verification",
+        choices=(
+            "user-reported-unverified",
+            "provider-export-verified",
+            "invoice-verified",
+        ),
+        default="user-reported-unverified",
+    )
+    coverage = cash.add_mutually_exclusive_group(required=True)
+    coverage.add_argument("--through-sequence", type=int)
+    coverage.add_argument("--through-current-finalized", action="store_true")
+    cash.add_argument("--allow-decrease", action="store_true")
     return parser
 
 
 def _unavailable(message: str) -> NoReturn:
     raise PhaseUnavailableError(message)
+
+
+def _nano_usd(value: str) -> int:
+    parts = value.split(".")
+    if (
+        len(parts) > 2
+        or not parts[0].isdigit()
+        or (len(parts) == 2 and (not parts[1].isdigit() or len(parts[1]) > 9))
+    ):
+        raise ConfigurationError("--billed-usd must be a nonnegative USD decimal")
+    fraction = parts[1] if len(parts) == 2 else ""
+    return int(parts[0]) * 1_000_000_000 + int((fraction + "0" * 9)[:9] or "0")
 
 
 def _dispatch(arguments: argparse.Namespace, repository_root: Path) -> int:
@@ -340,22 +396,52 @@ def _dispatch(arguments: argparse.Namespace, repository_root: Path) -> int:
         )
         return 0
     if arguments.command == "ledger":
-        if arguments.ledger_command != "rebuild":
-            raise AssertionError("unhandled ledger command")
         for path, name in ((arguments.policy, "--policy"), (arguments.ledger, "--ledger")):
             if path.is_absolute() or ".." in path.parts:
                 raise ConfigurationError(f"{name} must be repository-relative without '..'")
         policy = load_price_policy(repository_root / arguments.policy)
-        print(
-            canonical_json(
-                rebuild_project_ledger(
-                    repository_root=repository_root,
-                    path=repository_root / arguments.ledger,
-                    policy=policy,
+        ledger_path = repository_root / arguments.ledger
+        if arguments.ledger_command == "rebuild":
+            print(
+                canonical_json(
+                    rebuild_project_ledger(
+                        repository_root=repository_root,
+                        path=ledger_path,
+                        policy=policy,
+                    )
                 )
             )
-        )
-        return 0
+            return 0
+        if arguments.ledger_command == "status":
+            with ProjectLedger(ledger_path, policy) as ledger:
+                print(canonical_json(ledger.status()))
+            return 0
+        if arguments.ledger_command == "cash-history":
+            with ProjectLedger(ledger_path, policy) as ledger:
+                print(
+                    canonical_json(
+                        {
+                            "policy_hash": policy.content_hash,
+                            "checkpoints": ledger.cash_checkpoints(),
+                        }
+                    )
+                )
+            return 0
+        if arguments.ledger_command == "reconcile-cash":
+            covered = None if arguments.through_current_finalized else arguments.through_sequence
+            with ProjectLedger(ledger_path, policy) as ledger:
+                result = ledger.append_cash_checkpoint(
+                    cumulative_billed_nano_usd=_nano_usd(arguments.billed_usd),
+                    covered_reservation_sequence=covered,
+                    observed_at=arguments.observed_at,
+                    scope=arguments.scope,
+                    source=arguments.source,
+                    verification=arguments.verification,
+                    allow_decrease=arguments.allow_decrease,
+                )
+                print(canonical_json(result))
+            return 0
+        raise AssertionError("unhandled ledger command")
     raise AssertionError(f"unhandled command: {arguments.command}")
 
 

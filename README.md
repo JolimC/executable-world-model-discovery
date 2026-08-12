@@ -1,7 +1,7 @@
 # World Model Search
 
 World Model Search is an oracle-grounded research testbed for cumulative synthesis of compact,
-executable predictors. The repository now includes the **Phase 4 no-cost implementation**: a
+executable predictors. The repository now includes the **Phase 4 implementation**: a
 vendor-neutral batched LLM proposer, strict structured AST output, fixed direct/iterative prompts,
 exact caching, bounded retries, crash-safe request records, hierarchical token/dollar budgets, a
 cumulative cost ledger, A/B/C conditions, a target-blind random baseline, paired analysis, offline
@@ -15,22 +15,25 @@ Post-result hardening adds total operator coverage, stricter archive/leakage/bud
 480-child reproducibility, task-clustered uncertainty diagnostics, and separate CPU/elapsed accounting;
 it does not rerun or reinterpret the consumed validation experiment.
 
-The live scientific Phase 4 compatibility gate **passed on the authorized revised training canary**.
+The live Phase 4 compatibility gate **passed on the authorized revised training canary**.
 The first canary's two attempts exhausted its 512-token output allowance; the versioned correction raised
 the per-request allowance to 2,048 without changing the model or dollar ceilings. `PHASE4-LIVE-CANARY-V2`
 returned and evaluated the exact two-item strict batch in one call, then replayed offline with zero
-provider calls. The cumulative published-rate estimate is $0.00357 across both canaries, with no uncertain
-charge. No development pilot exists, and the one-time test registry is therefore not frozen. Fake A/B/C
-evidence validates the machinery but is not evidence for H1 or H2.
-Learned primitives, interestingness schedulers, active queries, memory, and meta-learning remain absent
-as later-phase mechanisms.
+provider calls.
 
-The versioned development pilot now retains ten independent development tasks and 256 evaluations per
-condition, but uses two search seeds rather than four so its 60 children can each retain the policy's
-$0.15 safety ceiling while summed exposure remains $9.00 under the $9.75 stage cap. It requests batches
-of four with 2,048 output tokens/request. Its no-cost dry run verifies the exact successful canary record
-and reports 3,780 planned logical calls. Existing incomplete hash-matched children resume through the
-crash-safe request state machine; the pilot has not been authorized or executed.
+The authorized development pilot subsequently completed all 60 children: ten independent development
+tasks, two seeds, three conditions, and 256 evaluations per child. Provider-disabled replay, artifact
+integrity, request/token/oracle accounting, and ledger reconciliation all passed. H1 (B-A) was not
+supported. H2 (C-B) was positive but inconclusive and is not established. Cumulative Phase 4 usage is
+$6.5268 at the frozen published-rate policy, with zero uncertain usage and no active reservation. The
+user separately reported $4.65 from the provider dashboard; that value is an unverified dashboard
+reconciliation, not a replacement for the conservative local ledger.
+
+**Engineering complete; development pilot complete; confirmatory locked test waived; H1/H2 remain
+unconfirmed.** Waiving the locked test is a disclosed protocol change from the original plan. No locked
+test registry was frozen or run, test outcomes were never accessed, and the test declaration remains
+fail-closed. Evidence is F0-only. Cross-task memory, learned primitives, interestingness schedulers,
+active queries, and other Phase 5+ mechanisms remain absent; no Phase 5 mechanism has been implemented.
 
 ## Quick start
 
@@ -96,4 +99,7 @@ backstop. See [`docs/phase4_implementation_report.md`](docs/phase4_implementatio
 
 Run the complete local CI command with `./scripts/ci.sh`. See
 [`docs/phase_status.md`](docs/phase_status.md) for gate evidence and
-[`docs/design_decisions.md`](docs/design_decisions.md) for the frozen Phase 0-4 contracts.
+[`docs/design_decisions.md`](docs/design_decisions.md) for the frozen Phase 0-4 contracts. The
+post-Phase-4 [dual-budget policy](docs/dual_budget_policy.md) preserves published-rate scientific
+accounting while enforcing the user's personal `$100` ceiling against reconciled provider cash plus
+worst-case unreconciled exposure.

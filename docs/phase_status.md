@@ -313,14 +313,16 @@ OS-level access auditing, and single-process/local-filesystem persistence qualif
 
 ## Phase 4 — Language-model proposer and primary experiment infrastructure
 
-**Implementation outcome: complete; live compatibility gate passed by the revised training canary.**
-Phase 4 adds the executable LLM/search/persistence/analysis machinery. The first authorized canary's two
-charged Responses calls reached its 512-output-token limit and failed schema completion. The authorized
-versioned correction raised only the per-request output allowance and derived token caps: its single call
-returned two strict candidate documents, both validated and evaluated, and replayed without provider
-access. The cumulative published-rate estimate is $0.00357 with no uncertain charge. No development
-outcome was observed, no test oracle artifact was opened, and the one-time test experiment remains an
-explicit non-executable pending declaration.
+**Engineering complete; development pilot complete; confirmatory locked test waived; H1/H2 remain
+unconfirmed.** Phase 4 adds the executable LLM/search/persistence/analysis machinery. The first
+authorized canary's two charged Responses calls reached its 512-output-token limit and failed schema
+completion. The authorized versioned correction raised only the per-request output allowance and
+derived token caps: its single call returned two strict candidate documents, both validated and
+evaluated, and replayed without provider access. The development pilot then completed all 60 children
+and passed provider-disabled replay, artifact-integrity, accounting, and ledger audits. H1 was not
+supported; H2 was positive but inconclusive. The user deliberately waived the planned locked
+confirmatory test after reviewing the pilot. This is a disclosed protocol change from the original
+plan, and neither hypothesis is treated as established.
 
 ### Frozen implementation contracts
 
@@ -417,6 +419,34 @@ Provider-disabled replay made zero proposer/provider calls and reproduced determ
 is `artifacts/reports/PHASE4-LIVE-CANARY-V2/summary.json`, canonical SHA-256
 `5be29b06b2434b771a0301c92fbc66c399b71655403848bff5ac9464a461850f`.
 
+### Development pilot and scientific closeout
+
+`phase4-primary-pilot-v2` completed 60/60 development children: ten opaque development tasks, two
+search seeds, and conditions A/direct, B/single-incumbent, and C/uniform-diverse-archive. Each child
+performed 256 charged evaluations. The run recorded 3,780 logical model calls, 3,797 physical attempts,
+17 bounded schema-failure retries, 14,940 valid proposal items, zero invalid items, and 15,360 exact
+oracle invocations. All 60 provider-disabled replays passed with zero proposer/provider calls. There
+were zero test-oracle invocations.
+
+The primary endpoint was normalized exact-solve AUC over 20 task/seed rows per condition. Mean AUC was
+`0.2015625` for A, `0.1927734375` for B, and `0.2892578125` for C. H1 (B-A) was not supported: estimate
+`-0.0087890625`, task-clustered 95% interval `[-0.208203125, 0.1470703125]`, Holm-adjusted
+`p=0.9293070693`. H2 (C-B) was positive but inconclusive: estimate `0.096484375`, task-clustered 95%
+interval `[-0.093359375, 0.326171875]`, Holm-adjusted `p=0.7347265273`. The interval crosses zero and
+the multiplicity-adjusted test did not reject, so H2 is not established.
+
+The conservative published-rate equivalent is **$6.5268** cumulatively for Phase 4 (exact ledger
+amount `$6.52680755`, including both canaries and the pilot). Uncertain usage is `$0`, and no active
+reservation exists. The user separately reported **$4.65** from the provider website. That number is
+recorded only as an **unverified dashboard reconciliation**: no provider export or invoice was supplied,
+and it does not replace or reduce the frozen published-rate ledger.
+
+The user deliberately waived the locked confirmatory test after the pilot. The non-executable pending
+declaration was closed as `skipped-by-user-after-development-pilot`; model calls and test-oracle access
+remain prohibited. No locked registry was frozen, no locked child was run, and test outcomes were never
+accessed. Skipping confirmation is scientifically acceptable as a disclosed protocol change, but it
+leaves H1/H2 unconfirmed and cannot support a claim that H2 is established.
+
 ### Gate disposition
 
 | Gate | Evidence | Disposition |
@@ -426,8 +456,8 @@ is `artifacts/reports/PHASE4-LIVE-CANARY-V2/summary.json`, canonical SHA-256
 | Resume, replay, frozen report | every request boundary plus mid-batch; replay disables provider/cache; report disables oracle | Pass, no-cost |
 | Matched A/B/C and H1/H2 analysis | strict registries, rotating blocks, clustered/sensitivity bootstrap, enforced Holm, negative/null/positive tests | Pass as machinery only |
 | Live canary and replay | corrected 2,048-token request returned two valid items; exact provider-disabled replay and ledger audit pass | Pass, live training evidence |
-| Development pilot/power review | v2 dry run: 60 children, 2,048 tokens/request, $9 child ceilings under $9.75, exact canary prerequisite verified, zero hidden/provider calls | Ready but not run; awaiting separate live authorization |
-| One-time locked test | pending declaration prohibits model/test access until pilot freeze | Blocked; test untouched |
+| Development pilot/power review | 60/60 children complete; provider-disabled replay, artifact/hash, request/token/oracle, ledger, cost, runtime, variance, and power audits complete | Pass as development evidence; H1 unsupported, H2 positive but inconclusive |
+| One-time locked test | closed pending declaration prohibits model/test access; access ledgers record zero test calls and unconsumed test authority | Deliberately waived by user; outcomes never accessed |
 
 Final local verification covers 97 tests: the complete Phase 0-4 suite, the preserved 480-child Phase 3
 aggregate, Phase 4 boundary/leakage/accounting tests, Ruff formatting/lint, and strict mypy over 64
@@ -456,6 +486,8 @@ uv run --locked wms baseline random --config configs/phase4-fake-smoke.yaml --co
 ```
 
 Evidence remains F0-only: binary radius-one elementary cellular automata under the small frozen DSL.
-F1/F2 were not backfilled. Phase 4 adds no cross-task memory, learned primitive, interestingness/UCB
-scheduler, active query, hidden state, scaffold mutation, or Phase 5-8 claim. Fake evidence establishes
-engineering reproducibility only—not broad discovery, transfer, model superiority, or H1/H2.
+F1/F2 were not backfilled, limiting external validity and any claim of broad world-model discovery.
+Phase 4 adds no cross-task memory, learned primitive, interestingness/UCB scheduler, active query,
+hidden state, scaffold mutation, or Phase 5-8 claim. No Phase 5 mechanism has been implemented yet.
+The live pilot is development evidence only—not confirmation of H1/H2, broad discovery, transfer, or
+general model superiority.

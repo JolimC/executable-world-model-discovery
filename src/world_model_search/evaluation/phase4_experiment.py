@@ -326,7 +326,7 @@ def load_phase4_experiment_registry(path: Path) -> Phase4ExperimentRegistry:
 
 def _ledger_balance(path: Path, policy: PricePolicy) -> JsonObject:
     if not path.is_file():
-        return {
+        result: JsonObject = {
             "state": "not-created",
             "opening_nano_usd": policy.opening_balance_nano_usd,
             "actual_nano_usd": 0,
@@ -334,6 +334,25 @@ def _ledger_balance(path: Path, policy: PricePolicy) -> JsonObject:
             "active_reserved_nano_usd": 0,
             "committed_nano_usd": policy.opening_balance_nano_usd,
         }
+        if policy.cash_budget is not None:
+            cash = policy.cash_budget
+            upper = cash.opening_reconciled_cash_nano_usd + cash.safety_buffer_nano_usd
+            result["cash_budget"] = {
+                "enforcement_basis": "reconciled-cash-plus-unreconciled-published-v1",
+                "personal_lifetime_cap_nano_usd": cash.personal_lifetime_cap_nano_usd,
+                "safety_buffer_nano_usd": cash.safety_buffer_nano_usd,
+                "reconciled_cash_nano_usd": cash.opening_reconciled_cash_nano_usd,
+                "covered_reservation_sequence": 0,
+                "covered_published_nano_usd": cash.opening_covered_published_nano_usd,
+                "unreconciled_actual_nano_usd": 0,
+                "uncertain_nano_usd": 0,
+                "active_reserved_nano_usd": 0,
+                "cash_upper_bound_nano_usd": upper,
+                "remaining_authorizable_nano_usd": max(
+                    0, cash.personal_lifetime_cap_nano_usd - upper
+                ),
+            }
+        return result
     try:
         connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         connection.row_factory = sqlite3.Row
@@ -348,6 +367,66 @@ def _ledger_balance(path: Path, policy: PricePolicy) -> JsonObject:
                           reserved
                FROM reservation"""
         ).fetchone()
+        cash_balance: JsonObject | None = None
+        if policy.cash_budget is not None:
+            checkpoint = connection.execute(
+                "SELECT * FROM cash_checkpoint ORDER BY checkpoint_sequence DESC LIMIT 1"
+            ).fetchone()
+            cash = policy.cash_budget
+            covered = int(checkpoint["covered_reservation_sequence"]) if checkpoint else 0
+            billed = (
+                int(checkpoint["cumulative_billed_nano_usd"])
+                if checkpoint
+                else cash.opening_reconciled_cash_nano_usd
+            )
+            covered_published = (
+                int(checkpoint["covered_published_nano_usd"])
+                if checkpoint
+                else cash.opening_covered_published_nano_usd
+            )
+            invalid = connection.execute(
+                "SELECT COUNT(*) AS count FROM reservation "
+                "WHERE rowid <= ? AND state != 'reconciled'",
+                (covered,),
+            ).fetchone()
+            if invalid is not None and int(invalid["count"]):
+                raise PersistenceError(
+                    "cash checkpoint covers unfinished or uncertain reservations"
+                )
+            post = connection.execute(
+                """SELECT
+                    COALESCE(SUM(CASE WHEN state='reconciled' AND rowid > ?
+                        THEN actual_nano_usd ELSE 0 END),0) actual,
+                    COALESCE(SUM(CASE WHEN state='uncertain' AND rowid > ?
+                        THEN uncertain_nano_usd ELSE 0 END),0) uncertain,
+                    COALESCE(SUM(CASE WHEN state='active' AND rowid > ?
+                        THEN reserved_nano_usd ELSE 0 END),0) reserved
+                    FROM reservation""",
+                (covered, covered, covered),
+            ).fetchone()
+            if post is None:
+                raise PersistenceError("cannot read dual-budget exposure for dry-run")
+            post_actual = int(post["actual"])
+            post_uncertain = int(post["uncertain"])
+            post_reserved = int(post["reserved"])
+            upper = (
+                billed + post_actual + post_uncertain + post_reserved + cash.safety_buffer_nano_usd
+            )
+            cash_balance = {
+                "enforcement_basis": "reconciled-cash-plus-unreconciled-published-v1",
+                "personal_lifetime_cap_nano_usd": cash.personal_lifetime_cap_nano_usd,
+                "safety_buffer_nano_usd": cash.safety_buffer_nano_usd,
+                "reconciled_cash_nano_usd": billed,
+                "covered_reservation_sequence": covered,
+                "covered_published_nano_usd": covered_published,
+                "unreconciled_actual_nano_usd": post_actual,
+                "uncertain_nano_usd": post_uncertain,
+                "active_reserved_nano_usd": post_reserved,
+                "cash_upper_bound_nano_usd": upper,
+                "remaining_authorizable_nano_usd": max(
+                    0, cash.personal_lifetime_cap_nano_usd - upper
+                ),
+            }
         connection.close()
     except sqlite3.Error as exc:
         raise PersistenceError("cannot read the project cost ledger for dry-run") from exc
@@ -356,7 +435,7 @@ def _ledger_balance(path: Path, policy: PricePolicy) -> JsonObject:
     actual = int(row["actual"])
     uncertain = int(row["uncertain"])
     reserved = int(row["reserved"])
-    return {
+    result = {
         "state": "existing-verified",
         "opening_nano_usd": policy.opening_balance_nano_usd,
         "actual_nano_usd": actual,
@@ -364,6 +443,9 @@ def _ledger_balance(path: Path, policy: PricePolicy) -> JsonObject:
         "active_reserved_nano_usd": reserved,
         "committed_nano_usd": policy.opening_balance_nano_usd + actual + uncertain + reserved,
     }
+    if cash_balance is not None:
+        result["cash_budget"] = cash_balance
+    return result
 
 
 def _canary_prerequisite_status(
@@ -439,9 +521,24 @@ def phase4_dry_run(*, repository_root: Path, registry: Phase4ExperimentRegistry)
         base.phase4_budget.proposal_item_cap + base.proposer.batch_size - 1
     ) // base.proposer.batch_size
     stage_cap = policy.stage_cap(base.phase4_policy.stage)
+    ledger_balance = _ledger_balance(repository_root / base.phase4_policy.ledger, policy)
     blockers: list[str] = []
     if planned_exposure > stage_cap:
         blockers.append("sum of per-child ceilings exceeds the experiment-stage ceiling")
+    cash_balance = ledger_balance.get("cash_budget")
+    if isinstance(cash_balance, dict):
+        upper = cash_balance.get("cash_upper_bound_nano_usd")
+        cap = cash_balance.get("personal_lifetime_cap_nano_usd")
+        if (
+            isinstance(upper, int)
+            and not isinstance(upper, bool)
+            and isinstance(cap, int)
+            and not isinstance(cap, bool)
+            and upper + planned_exposure > cap
+        ):
+            blockers.append(
+                "all-child worst-case exposure exceeds remaining reconciled cash headroom"
+            )
     prerequisite_status: JsonObject = {"required": False, "status": "not-required"}
     if registry.status == "development-pilot":
         if registry.prerequisite_canary is None:
@@ -498,10 +595,15 @@ def phase4_dry_run(*, repository_root: Path, registry: Phase4ExperimentRegistry)
             "stage": stage_cap,
             "phase4": policy.phase4_cap_nano_usd,
             "project": policy.project_lifetime_cap_nano_usd,
+            "project_enforcement_basis": (
+                "reconciled-cash-plus-unreconciled-published-v1"
+                if policy.uses_reconciled_cash_budget
+                else "cumulative-published-rate-v1"
+            ),
             "prior_phase_0_3_spend": policy.prior_phase_0_3_spend_nano_usd,
         },
         "price_policy_hash": policy.content_hash,
-        "ledger": _ledger_balance(repository_root / base.phase4_policy.ledger, policy),
+        "ledger": ledger_balance,
         "evidence_class": "forecast-only-no-scientific-result",
     }
 

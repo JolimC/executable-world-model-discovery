@@ -6,13 +6,23 @@ import json
 import os
 import sqlite3
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 
 from world_model_search.errors import BudgetExhaustedError, PersistenceError
-from world_model_search.model.policy import PricePolicy
+from world_model_search.model.policy import CASH_VERIFICATION_LEVELS, PricePolicy
+from world_model_search.persistence.manifest import utc_now
 from world_model_search.serialization import JsonObject, canonical_json, sha256_text
 
 LEDGER_SCHEMA_VERSION = 1
+DUAL_LEDGER_SCHEMA_VERSION = 2
+CASH_CHECKPOINT_VERSION = "provider-cash-reconciliation-v1"
+
+
+def _json_int(value: object, location: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise PersistenceError(f"{location} is not an integer")
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +51,54 @@ class LedgerBalance:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class CashBudgetBalance:
+    personal_lifetime_cap_nano_usd: int
+    safety_buffer_nano_usd: int
+    reconciled_cash_nano_usd: int
+    covered_reservation_sequence: int
+    covered_published_nano_usd: int
+    unreconciled_actual_nano_usd: int
+    uncertain_nano_usd: int
+    active_reserved_nano_usd: int
+    checkpoint: JsonObject
+
+    @property
+    def cash_upper_bound_nano_usd(self) -> int:
+        return (
+            self.reconciled_cash_nano_usd
+            + self.unreconciled_actual_nano_usd
+            + self.uncertain_nano_usd
+            + self.active_reserved_nano_usd
+            + self.safety_buffer_nano_usd
+        )
+
+    @property
+    def remaining_authorizable_nano_usd(self) -> int:
+        return max(0, self.personal_lifetime_cap_nano_usd - self.cash_upper_bound_nano_usd)
+
+    @property
+    def overage_nano_usd(self) -> int:
+        return max(0, self.cash_upper_bound_nano_usd - self.personal_lifetime_cap_nano_usd)
+
+    def to_value(self) -> JsonObject:
+        return {
+            "enforcement_basis": "reconciled-cash-plus-unreconciled-published-v1",
+            "personal_lifetime_cap_nano_usd": self.personal_lifetime_cap_nano_usd,
+            "safety_buffer_nano_usd": self.safety_buffer_nano_usd,
+            "reconciled_cash_nano_usd": self.reconciled_cash_nano_usd,
+            "covered_reservation_sequence": self.covered_reservation_sequence,
+            "covered_published_nano_usd": self.covered_published_nano_usd,
+            "unreconciled_actual_nano_usd": self.unreconciled_actual_nano_usd,
+            "uncertain_nano_usd": self.uncertain_nano_usd,
+            "active_reserved_nano_usd": self.active_reserved_nano_usd,
+            "cash_upper_bound_nano_usd": self.cash_upper_bound_nano_usd,
+            "remaining_authorizable_nano_usd": self.remaining_authorizable_nano_usd,
+            "overage_nano_usd": self.overage_nano_usd,
+            "checkpoint": self.checkpoint,
+        }
+
+
 class ProjectLedger:
     def __init__(self, path: Path, policy: PricePolicy) -> None:
         self.path = path
@@ -48,6 +106,7 @@ class ProjectLedger:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(path, timeout=30)
         self.connection.row_factory = sqlite3.Row
+        self._validate_existing_identity()
         self.connection.execute("PRAGMA journal_mode = WAL")
         self.connection.execute("PRAGMA synchronous = FULL")
         self._initialize()
@@ -58,7 +117,32 @@ class ProjectLedger:
     def __exit__(self, *_args: object) -> None:
         self.connection.close()
 
+    def _expected_schema(self) -> int:
+        return (
+            DUAL_LEDGER_SCHEMA_VERSION
+            if self.policy.uses_reconciled_cash_budget
+            else LEDGER_SCHEMA_VERSION
+        )
+
+    def _validate_existing_identity(self) -> None:
+        metadata_exists = self.connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='metadata'"
+        ).fetchone()
+        if metadata_exists is None:
+            return
+        metadata = {
+            str(row["key"]): str(row["value"])
+            for row in self.connection.execute("SELECT key,value FROM metadata")
+        }
+        if (
+            metadata.get("ledger_schema_version") != str(self._expected_schema())
+            or metadata.get("policy_hash") != self.policy.content_hash
+        ):
+            self.connection.close()
+            raise PersistenceError("project ledger schema or price-policy identity mismatch")
+
     def _initialize(self) -> None:
+        expected_schema = self._expected_schema()
         with self.connection:
             self.connection.executescript(
                 """
@@ -85,6 +169,29 @@ class ProjectLedger:
                 );
                 """
             )
+            if self.policy.uses_reconciled_cash_budget:
+                self.connection.executescript(
+                    """
+                    CREATE TABLE IF NOT EXISTS cash_checkpoint (
+                        checkpoint_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                        checkpoint_id TEXT NOT NULL UNIQUE,
+                        covered_reservation_sequence INTEGER NOT NULL
+                            CHECK (covered_reservation_sequence >= 0),
+                        cumulative_billed_nano_usd INTEGER NOT NULL
+                            CHECK (cumulative_billed_nano_usd >= 0),
+                        covered_published_nano_usd INTEGER NOT NULL
+                            CHECK (covered_published_nano_usd >= 0),
+                        observed_at TEXT NOT NULL,
+                        scope TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        verification TEXT NOT NULL,
+                        decrease_authorized INTEGER NOT NULL CHECK (decrease_authorized IN (0,1)),
+                        recorded_at TEXT NOT NULL,
+                        record_json TEXT NOT NULL,
+                        record_hash TEXT NOT NULL
+                    );
+                    """
+                )
             existing = self.connection.execute(
                 "SELECT value FROM metadata WHERE key='ledger_schema_version'"
             ).fetchone()
@@ -92,7 +199,7 @@ class ProjectLedger:
                 self.connection.executemany(
                     "INSERT INTO metadata VALUES (?, ?)",
                     (
-                        ("ledger_schema_version", str(LEDGER_SCHEMA_VERSION)),
+                        ("ledger_schema_version", str(expected_schema)),
                         ("policy_hash", self.policy.content_hash),
                         ("opening_nano_usd", str(self.policy.opening_balance_nano_usd)),
                     ),
@@ -101,7 +208,7 @@ class ProjectLedger:
                 policy = self.connection.execute(
                     "SELECT value FROM metadata WHERE key='policy_hash'"
                 ).fetchone()
-                if existing["value"] != str(LEDGER_SCHEMA_VERSION) or policy is None:
+                if existing["value"] != str(expected_schema) or policy is None:
                     raise PersistenceError("unsupported or corrupt project ledger")
                 if policy["value"] != self.policy.content_hash:
                     raise PersistenceError("project ledger price-policy hash mismatch")
@@ -120,6 +227,299 @@ class ProjectLedger:
             uncertain_nano_usd=self._sum("uncertain_nano_usd"),
             active_reserved_nano_usd=self._sum("reserved_nano_usd", "state='active'"),
         )
+
+    def _latest_reservation_sequence(self) -> int:
+        row = self.connection.execute(
+            "SELECT COALESCE(MAX(rowid),0) AS sequence FROM reservation"
+        ).fetchone()
+        return int(row["sequence"] if row is not None else 0)
+
+    def _reconcilable_through_sequence(self) -> int:
+        rows = self.connection.execute(
+            "SELECT rowid AS reservation_sequence, state FROM reservation ORDER BY rowid"
+        ).fetchall()
+        covered = 0
+        for row in rows:
+            if row["state"] != "reconciled":
+                break
+            covered = int(row["reservation_sequence"])
+        return covered
+
+    def _opening_checkpoint(self) -> JsonObject:
+        cash = self.policy.cash_budget
+        if cash is None:
+            raise PersistenceError("cash reconciliation requires a dual-budget policy")
+        return {
+            "checkpoint_sequence": 0,
+            "checkpoint_id": "opening-policy-reconciliation",
+            "covered_reservation_sequence": 0,
+            "cumulative_billed_nano_usd": cash.opening_reconciled_cash_nano_usd,
+            "covered_published_nano_usd": cash.opening_covered_published_nano_usd,
+            "observed_at": cash.opening_observed_at,
+            "scope": cash.opening_scope,
+            "source": cash.opening_source,
+            "verification": cash.opening_verification,
+            "decrease_authorized": False,
+            "recorded_at": None,
+            "record_hash": self.policy.content_hash,
+        }
+
+    def _checkpoint_from_row(self, row: sqlite3.Row) -> JsonObject:
+        record_text = str(row["record_json"])
+        record_hash = str(row["record_hash"])
+        if record_hash != sha256_text(record_text) or str(row["checkpoint_id"]) != record_hash:
+            raise PersistenceError("cash checkpoint record hash mismatch")
+        try:
+            record = json.loads(record_text)
+        except json.JSONDecodeError as exc:
+            raise PersistenceError("cash checkpoint record is malformed") from exc
+        expected_keys = {
+            "checkpoint_version",
+            "cumulative_billed_nano_usd",
+            "covered_reservation_sequence",
+            "covered_published_nano_usd",
+            "observed_at",
+            "scope",
+            "source",
+            "verification",
+            "decrease_authorized",
+            "policy_hash",
+        }
+        if (
+            not isinstance(record, dict)
+            or set(record) != expected_keys
+            or canonical_json(record) != record_text
+            or record.get("checkpoint_version") != CASH_CHECKPOINT_VERSION
+            or record.get("policy_hash") != self.policy.content_hash
+        ):
+            raise PersistenceError("cash checkpoint canonical record is inconsistent")
+        indexed: JsonObject = {
+            "cumulative_billed_nano_usd": int(row["cumulative_billed_nano_usd"]),
+            "covered_reservation_sequence": int(row["covered_reservation_sequence"]),
+            "covered_published_nano_usd": int(row["covered_published_nano_usd"]),
+            "observed_at": str(row["observed_at"]),
+            "scope": str(row["scope"]),
+            "source": str(row["source"]),
+            "verification": str(row["verification"]),
+            "decrease_authorized": bool(row["decrease_authorized"]),
+        }
+        if any(record.get(key) != value for key, value in indexed.items()):
+            raise PersistenceError("cash checkpoint indexed fields diverge from its record")
+        return {
+            "checkpoint_sequence": int(row["checkpoint_sequence"]),
+            "checkpoint_id": str(row["checkpoint_id"]),
+            **indexed,
+            "recorded_at": str(row["recorded_at"]),
+            "record_hash": record_hash,
+        }
+
+    def _latest_checkpoint(self) -> JsonObject:
+        if not self.policy.uses_reconciled_cash_budget:
+            raise PersistenceError("cash reconciliation requires a dual-budget policy")
+        row = self.connection.execute(
+            "SELECT * FROM cash_checkpoint ORDER BY checkpoint_sequence DESC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return self._opening_checkpoint()
+        return self._checkpoint_from_row(row)
+
+    def _cash_balance_locked(self) -> CashBudgetBalance:
+        cash = self.policy.cash_budget
+        if cash is None:
+            raise PersistenceError("cash balance requires a dual-budget policy")
+        checkpoint = self._latest_checkpoint()
+        covered = _json_int(checkpoint["covered_reservation_sequence"], "cash checkpoint coverage")
+        invalid = self.connection.execute(
+            "SELECT COUNT(*) AS count FROM reservation WHERE rowid <= ? AND state != 'reconciled'",
+            (covered,),
+        ).fetchone()
+        if invalid is not None and int(invalid["count"]):
+            raise PersistenceError("cash checkpoint covers unfinished or uncertain reservations")
+        return CashBudgetBalance(
+            personal_lifetime_cap_nano_usd=cash.personal_lifetime_cap_nano_usd,
+            safety_buffer_nano_usd=cash.safety_buffer_nano_usd,
+            reconciled_cash_nano_usd=_json_int(
+                checkpoint["cumulative_billed_nano_usd"], "cash checkpoint billed amount"
+            ),
+            covered_reservation_sequence=covered,
+            covered_published_nano_usd=_json_int(
+                checkpoint["covered_published_nano_usd"],
+                "cash checkpoint covered published amount",
+            ),
+            unreconciled_actual_nano_usd=self._sum(
+                "actual_nano_usd", "state='reconciled' AND rowid > ?", (covered,)
+            ),
+            uncertain_nano_usd=self._sum(
+                "uncertain_nano_usd", "state='uncertain' AND rowid > ?", (covered,)
+            ),
+            active_reserved_nano_usd=self._sum(
+                "reserved_nano_usd", "state='active' AND rowid > ?", (covered,)
+            ),
+            checkpoint=checkpoint,
+        )
+
+    def cash_balance(self) -> CashBudgetBalance:
+        return self._cash_balance_locked()
+
+    def status(self) -> JsonObject:
+        cash: JsonObject | None = None
+        checkpoint_count = 0
+        if self.policy.uses_reconciled_cash_budget:
+            cash = self.cash_balance().to_value()
+            row = self.connection.execute(
+                "SELECT COUNT(*) AS count FROM cash_checkpoint"
+            ).fetchone()
+            checkpoint_count = 1 + int(row["count"] if row is not None else 0)
+        return {
+            "ledger_schema_version": (
+                DUAL_LEDGER_SCHEMA_VERSION
+                if self.policy.uses_reconciled_cash_budget
+                else LEDGER_SCHEMA_VERSION
+            ),
+            "policy_version": self.policy.policy_version,
+            "policy_hash": self.policy.content_hash,
+            "published_rate_balance": self.balance().to_value(),
+            "cash_budget": cash,
+            "latest_reservation_sequence": self._latest_reservation_sequence(),
+            "reconcilable_through_sequence": self._reconcilable_through_sequence(),
+            "cash_checkpoint_count_including_opening": checkpoint_count,
+        }
+
+    def cash_checkpoints(self) -> tuple[JsonObject, ...]:
+        if not self.policy.uses_reconciled_cash_budget:
+            raise PersistenceError("cash checkpoint history requires a dual-budget policy")
+        checkpoints = [self._opening_checkpoint()]
+        for row in self.connection.execute(
+            "SELECT * FROM cash_checkpoint ORDER BY checkpoint_sequence"
+        ):
+            checkpoint = self._checkpoint_from_row(row)
+            checkpoints.append(
+                {
+                    "checkpoint_sequence": checkpoint["checkpoint_sequence"],
+                    "checkpoint_id": checkpoint["checkpoint_id"],
+                    "recorded_at": checkpoint["recorded_at"],
+                    "record": json.loads(str(row["record_json"])),
+                }
+            )
+        return tuple(checkpoints)
+
+    @staticmethod
+    def _validate_observed_at(value: str) -> None:
+        try:
+            if "T" not in value:
+                date.fromisoformat(value)
+            else:
+                parsed = datetime.fromisoformat(value)
+                if parsed.tzinfo is None or parsed.utcoffset() is None:
+                    raise ValueError
+        except ValueError as exc:
+            raise PersistenceError(
+                "cash checkpoint observed_at must be an ISO date or offset datetime"
+            ) from exc
+
+    def append_cash_checkpoint(
+        self,
+        *,
+        cumulative_billed_nano_usd: int,
+        covered_reservation_sequence: int | None,
+        observed_at: str,
+        scope: str,
+        source: str,
+        verification: str,
+        allow_decrease: bool = False,
+    ) -> JsonObject:
+        if not self.policy.uses_reconciled_cash_budget:
+            raise PersistenceError("cash checkpoints require a dual-budget policy")
+        if cumulative_billed_nano_usd < 0:
+            raise PersistenceError("cumulative billed cash cannot be negative")
+        if not scope.strip() or not source.strip():
+            raise PersistenceError("cash checkpoint scope/source must be nonempty")
+        if verification not in CASH_VERIFICATION_LEVELS:
+            raise PersistenceError("cash checkpoint verification is invalid")
+        self._validate_observed_at(observed_at)
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            latest = self._latest_checkpoint()
+            latest_covered = _json_int(
+                latest["covered_reservation_sequence"], "cash checkpoint coverage"
+            )
+            target = (
+                self._reconcilable_through_sequence()
+                if covered_reservation_sequence is None
+                else covered_reservation_sequence
+            )
+            if (
+                target < 0
+                or target < latest_covered
+                or target > self._latest_reservation_sequence()
+            ):
+                raise PersistenceError("cash checkpoint coverage sequence is invalid or regressive")
+            unfinished = self.connection.execute(
+                "SELECT COUNT(*) AS count FROM reservation "
+                "WHERE rowid <= ? AND state != 'reconciled'",
+                (target,),
+            ).fetchone()
+            if unfinished is not None and int(unfinished["count"]):
+                raise PersistenceError("cash checkpoint cannot cover active or uncertain usage")
+            previous_billed = _json_int(
+                latest["cumulative_billed_nano_usd"], "cash checkpoint billed amount"
+            )
+            if cumulative_billed_nano_usd < previous_billed and not allow_decrease:
+                raise PersistenceError(
+                    "cumulative billed cash decreased without explicit authorization"
+                )
+            covered_published = self.policy.opening_balance_nano_usd + self._sum(
+                "actual_nano_usd", "state='reconciled' AND rowid <= ?", (target,)
+            )
+            record: JsonObject = {
+                "checkpoint_version": CASH_CHECKPOINT_VERSION,
+                "cumulative_billed_nano_usd": cumulative_billed_nano_usd,
+                "covered_reservation_sequence": target,
+                "covered_published_nano_usd": covered_published,
+                "observed_at": observed_at,
+                "scope": scope.strip(),
+                "source": source.strip(),
+                "verification": verification,
+                "decrease_authorized": allow_decrease,
+                "policy_hash": self.policy.content_hash,
+            }
+            record_text = canonical_json(record)
+            record_hash = sha256_text(record_text)
+            existing = self.connection.execute(
+                "SELECT checkpoint_sequence FROM cash_checkpoint WHERE record_hash=?",
+                (record_hash,),
+            ).fetchone()
+            if existing is None:
+                self.connection.execute(
+                    """INSERT INTO cash_checkpoint (
+                        checkpoint_id, covered_reservation_sequence,
+                        cumulative_billed_nano_usd, covered_published_nano_usd,
+                        observed_at, scope, source, verification, decrease_authorized,
+                        recorded_at, record_json, record_hash
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        record_hash,
+                        target,
+                        cumulative_billed_nano_usd,
+                        covered_published,
+                        observed_at,
+                        scope.strip(),
+                        source.strip(),
+                        verification,
+                        int(allow_decrease),
+                        utc_now(),
+                        record_text,
+                        record_hash,
+                    ),
+                )
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+        return {
+            "checkpoint": self._latest_checkpoint(),
+            "cash_budget": self.cash_balance().to_value(),
+        }
 
     def reserve(
         self,
@@ -168,12 +568,27 @@ class ProjectLedger:
                 (run_id,),
             )
             project_committed = self.policy.opening_balance_nano_usd + phase_committed
-            checks = (
-                (project_committed + amount_nano_usd, self.policy.project_lifetime_cap_nano_usd),
+            checks = [
                 (phase_committed + amount_nano_usd, self.policy.phase4_cap_nano_usd),
                 (stage_committed + amount_nano_usd, self.policy.stage_cap(stage)),
                 (child_committed + amount_nano_usd, child_cap_nano_usd),
-            )
+            ]
+            if self.policy.uses_reconciled_cash_budget:
+                cash = self._cash_balance_locked()
+                if (
+                    cash.cash_upper_bound_nano_usd + amount_nano_usd
+                    > cash.personal_lifetime_cap_nano_usd
+                ):
+                    raise BudgetExhaustedError(
+                        "reservation would exceed the reconciled personal cash ceiling"
+                    )
+            else:
+                checks.append(
+                    (
+                        project_committed + amount_nano_usd,
+                        self.policy.project_lifetime_cap_nano_usd,
+                    )
+                )
             if any(value > cap for value, cap in checks):
                 raise BudgetExhaustedError(
                     "hierarchical model-dollar reservation would exceed a cap"
@@ -298,6 +713,11 @@ def rebuild_project_ledger(*, repository_root: Path, path: Path, policy: PricePo
                 "records": len(existing.records()),
                 "balance": existing.balance().to_value(),
             }
+    if policy.uses_reconciled_cash_budget:
+        raise PersistenceError(
+            "a missing dual-budget ledger cannot be rebuilt from legacy-policy artifacts; "
+            "restore its backup or initialize the versioned opening carry-forward"
+        )
     temporary = path.with_name(f"{path.name}.rebuild-in-progress")
     if temporary.exists():
         raise PersistenceError("an incomplete ledger rebuild already exists")

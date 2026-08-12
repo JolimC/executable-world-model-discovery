@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
@@ -8,10 +9,11 @@ from pathlib import Path
 import pytest
 from pytest import MonkeyPatch
 
+from world_model_search.cli import main
 from world_model_search.config import config_from_mapping, load_config
 from world_model_search.domain.types import CandidateSummary, ProposalRole
 from world_model_search.dsl.ast import AstLimits, At
-from world_model_search.errors import ConfigurationError, PersistenceError
+from world_model_search.errors import BudgetExhaustedError, ConfigurationError, PersistenceError
 from world_model_search.evaluation.phase4_experiment import (
     analyze_phase4_rows,
     load_phase4_experiment_registry,
@@ -263,6 +265,231 @@ def test_project_ledger_serializes_concurrent_reservations(tmp_path: Path) -> No
         assert len(ledger.records()) == 8
 
 
+def test_dual_budget_preserves_published_cost_and_reconciles_cash(tmp_path: Path) -> None:
+    legacy = load_price_policy(Path("configs/phase4-price-policy-v1.yaml"))
+    assert legacy.content_hash == "120ca1d0cb66d23230ff8267d4c0eb492421e8de55dc4e1e97950e5cd7fc93fa"
+    policy = load_price_policy(Path("configs/project-dual-budget-policy-v2.yaml"))
+    assert policy.uses_reconciled_cash_budget is True
+    assert policy.opening_balance_nano_usd == 6_526_807_550
+    assert policy.cash_budget is not None
+    assert policy.cash_budget.opening_reconciled_cash_nano_usd == 4_650_000_000
+
+    with ProjectLedger(tmp_path / "dual.sqlite3", policy) as ledger:
+        initial = ledger.cash_balance()
+        assert initial.reconciled_cash_nano_usd == 4_650_000_000
+        assert initial.covered_published_nano_usd == 6_526_807_550
+        assert initial.cash_upper_bound_nano_usd == 4_650_000_000
+        ledger.reserve(
+            reservation_id="dual-r1",
+            run_id="dual-child",
+            stage="canary",
+            request_hash="d" * 64,
+            amount_nano_usd=1_000_000,
+            child_cap_nano_usd=150_000_000,
+        )
+        assert ledger.cash_balance().active_reserved_nano_usd == 1_000_000
+        ledger.reconcile(
+            reservation_id="dual-r1",
+            actual_nano_usd=250_000,
+            usage_record={"usage": "dual-r1"},
+        )
+        before_checkpoint = ledger.cash_balance()
+        assert before_checkpoint.unreconciled_actual_nano_usd == 250_000
+        assert before_checkpoint.cash_upper_bound_nano_usd == 4_650_250_000
+        result = ledger.append_cash_checkpoint(
+            cumulative_billed_nano_usd=4_660_000_000,
+            covered_reservation_sequence=None,
+            observed_at="2026-08-12T09:30:00-05:00",
+            scope="provider project through dual-r1",
+            source="user-reported-provider-dashboard",
+            verification="user-reported-unverified",
+        )
+        duplicate = ledger.append_cash_checkpoint(
+            cumulative_billed_nano_usd=4_660_000_000,
+            covered_reservation_sequence=1,
+            observed_at="2026-08-12T09:30:00-05:00",
+            scope="provider project through dual-r1",
+            source="user-reported-provider-dashboard",
+            verification="user-reported-unverified",
+        )
+        assert duplicate["checkpoint"] == result["checkpoint"]
+        cash = result["cash_budget"]
+        assert isinstance(cash, dict)
+        assert cash["reconciled_cash_nano_usd"] == 4_660_000_000
+        assert cash["unreconciled_actual_nano_usd"] == 0
+        assert cash["covered_published_nano_usd"] == 6_527_057_550
+        assert ledger.status()["reconcilable_through_sequence"] == 1
+        assert ledger.status()["cash_checkpoint_count_including_opening"] == 2
+        assert len(ledger.cash_checkpoints()) == 2
+        assert len(ledger.records()) == 1
+
+
+def test_dual_budget_cash_cap_and_checkpoint_boundaries_fail_closed(tmp_path: Path) -> None:
+    policy = load_price_policy(Path("configs/project-dual-budget-policy-v2.yaml"))
+    assert policy.cash_budget is not None
+    near_cap_cash = replace(
+        policy.cash_budget,
+        opening_reconciled_cash_nano_usd=99_999_500_000,
+    )
+    near_cap = replace(policy, cash_budget=near_cap_cash)
+    with (
+        ProjectLedger(tmp_path / "near-cap.sqlite3", near_cap) as ledger,
+        pytest.raises(BudgetExhaustedError, match="personal cash ceiling"),
+    ):
+        ledger.reserve(
+            reservation_id="blocked",
+            run_id="dual-child",
+            stage="canary",
+            request_hash="e" * 64,
+            amount_nano_usd=1_000_000,
+            child_cap_nano_usd=150_000_000,
+        )
+
+    promoted_opening = 120_000_000_000
+    promoted_cash = replace(
+        policy.cash_budget,
+        opening_covered_published_nano_usd=promoted_opening,
+    )
+    promoted = replace(
+        policy,
+        opening_balance_nano_usd=promoted_opening,
+        cash_budget=promoted_cash,
+    )
+    with ProjectLedger(tmp_path / "promoted.sqlite3", promoted) as ledger:
+        ledger.reserve(
+            reservation_id="allowed-over-published-100",
+            run_id="dual-child",
+            stage="canary",
+            request_hash="f" * 64,
+            amount_nano_usd=1_000_000,
+            child_cap_nano_usd=150_000_000,
+        )
+        with pytest.raises(PersistenceError, match="active or uncertain"):
+            ledger.append_cash_checkpoint(
+                cumulative_billed_nano_usd=4_650_000_000,
+                covered_reservation_sequence=1,
+                observed_at="2026-08-12",
+                scope="invalid active coverage",
+                source="user-reported-provider-dashboard",
+                verification="user-reported-unverified",
+            )
+
+
+def test_dual_budget_cli_status_and_cash_reconciliation(
+    tmp_path: Path, monkeypatch: MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_root = tmp_path / "configs"
+    config_root.mkdir()
+    (config_root / "project-dual-budget-policy-v2.yaml").write_bytes(
+        Path("configs/project-dual-budget-policy-v2.yaml").read_bytes()
+    )
+    monkeypatch.chdir(tmp_path)
+    assert main(["ledger", "status"]) == 0
+    status = json.loads(capsys.readouterr().out)
+    assert status["cash_budget"]["reconciled_cash_nano_usd"] == 4_650_000_000
+    assert status["published_rate_balance"]["opening_nano_usd"] == 6_526_807_550
+    assert (
+        main(
+            [
+                "ledger",
+                "reconcile-cash",
+                "--billed-usd",
+                "4.66",
+                "--observed-at",
+                "2026-08-12T10:15:00-05:00",
+                "--scope",
+                "provider project through current finalized usage",
+                "--through-current-finalized",
+            ]
+        )
+        == 0
+    )
+    reconciled = json.loads(capsys.readouterr().out)
+    assert reconciled["cash_budget"]["reconciled_cash_nano_usd"] == 4_660_000_000
+    assert reconciled["checkpoint"]["verification"] == "user-reported-unverified"
+    assert main(["ledger", "cash-history"]) == 0
+    history = json.loads(capsys.readouterr().out)
+    assert len(history["checkpoints"]) == 2
+
+
+def test_dual_budget_serializes_concurrent_cash_reservations(tmp_path: Path) -> None:
+    policy = load_price_policy(Path("configs/project-dual-budget-policy-v2.yaml"))
+    assert policy.cash_budget is not None
+    limited_cash = replace(
+        policy.cash_budget,
+        opening_reconciled_cash_nano_usd=99_996_000_000,
+    )
+    limited = replace(policy, cash_budget=limited_cash)
+    ledger_path = tmp_path / "dual-concurrent.sqlite3"
+    with ProjectLedger(ledger_path, limited):
+        pass
+
+    def reserve(index: int) -> bool:
+        try:
+            with ProjectLedger(ledger_path, limited) as ledger:
+                ledger.reserve(
+                    reservation_id=f"dual-concurrent-{index}",
+                    run_id="dual-concurrent-child",
+                    stage="canary",
+                    request_hash=f"{index:064x}",
+                    amount_nano_usd=1_000_000,
+                    child_cap_nano_usd=150_000_000,
+                )
+        except BudgetExhaustedError:
+            return False
+        return True
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        outcomes = tuple(executor.map(reserve, range(8)))
+    assert outcomes.count(True) == outcomes.count(False) == 4
+    with ProjectLedger(ledger_path, limited) as ledger:
+        assert ledger.cash_balance().active_reserved_nano_usd == 4_000_000
+
+
+def test_dual_policy_cannot_mutate_or_open_the_legacy_ledger(tmp_path: Path) -> None:
+    legacy = load_price_policy(Path("configs/phase4-price-policy-v1.yaml"))
+    dual = load_price_policy(Path("configs/project-dual-budget-policy-v2.yaml"))
+    ledger_path = tmp_path / "legacy.sqlite3"
+    with ProjectLedger(ledger_path, legacy):
+        pass
+    with pytest.raises(PersistenceError, match="schema or price-policy identity mismatch"):
+        ProjectLedger(ledger_path, dual)
+    connection = sqlite3.connect(ledger_path)
+    try:
+        tables = {
+            str(row[0])
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+    finally:
+        connection.close()
+    assert "cash_checkpoint" not in tables
+
+
+def test_dual_budget_rejects_checkpoint_column_tampering(tmp_path: Path) -> None:
+    policy = load_price_policy(Path("configs/project-dual-budget-policy-v2.yaml"))
+    ledger_path = tmp_path / "tampered-checkpoint.sqlite3"
+    with ProjectLedger(ledger_path, policy) as ledger:
+        ledger.append_cash_checkpoint(
+            cumulative_billed_nano_usd=4_660_000_000,
+            covered_reservation_sequence=None,
+            observed_at="2026-08-12",
+            scope="provider project through opening usage",
+            source="user-reported-provider-dashboard",
+            verification="user-reported-unverified",
+        )
+    connection = sqlite3.connect(ledger_path)
+    try:
+        with connection:
+            connection.execute("UPDATE cash_checkpoint SET cumulative_billed_nano_usd=1")
+    finally:
+        connection.close()
+    with (
+        ProjectLedger(ledger_path, policy) as ledger,
+        pytest.raises(PersistenceError, match="indexed fields diverge"),
+    ):
+        ledger.cash_balance()
+
+
 def test_live_adapter_requires_both_opt_ins_and_never_reads_key_early(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -303,6 +530,36 @@ def test_phase4_registry_dry_run_and_null_negative_analysis(
         "status": "missing-or-unreadable",
         "run_id": "PHASE4-LIVE-CANARY-V2",
     }
+    dual_policy_target = phase2_repository / "configs/project-dual-budget-policy-v2.yaml"
+    dual_policy_target.write_bytes(Path("configs/project-dual-budget-policy-v2.yaml").read_bytes())
+    dual_config = phase2_repository / "configs/phase4-openai-pilot-dual-test.yaml"
+    dual_config.write_text(
+        Path("configs/phase4-openai-pilot.yaml")
+        .read_text()
+        .replace(
+            "configs/phase4-price-policy-v1.yaml",
+            "configs/project-dual-budget-policy-v2.yaml",
+        )
+        .replace(
+            "local_state/project-cost-ledger.sqlite3",
+            "local_state/project-dual-budget-dry-run-test.sqlite3",
+        )
+    )
+    dual_forecast = phase4_dry_run(
+        repository_root=phase2_repository,
+        registry=replace(pilot, base_config=dual_config),
+    )
+    dual_ledger = dual_forecast["ledger"]
+    assert isinstance(dual_ledger, dict)
+    assert dual_ledger["state"] == "not-created"
+    dual_cash = dual_ledger["cash_budget"]
+    assert isinstance(dual_cash, dict)
+    assert dual_cash["reconciled_cash_nano_usd"] == 4_650_000_000
+    worst_case = dual_forecast["worst_case_nano_usd"]
+    assert isinstance(worst_case, dict)
+    assert (
+        worst_case["project_enforcement_basis"] == "reconciled-cash-plus-unreconciled-published-v1"
+    )
     rows = []
     values = {
         Phase4Condition.DIRECT.value: 0.4,

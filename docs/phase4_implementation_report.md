@@ -2,16 +2,19 @@
 
 ## Outcome
 
-The Phase 4 no-cost implementation is complete. The real A/B/C engine, scripted transport, target-blind
+**Engineering complete; development pilot complete; confirmatory locked test waived; H1/H2 remain
+unconfirmed.** The real A/B/C engine, scripted transport, target-blind
 random baseline, bounded request/cache/retry/budget lifecycle, offline replay, paired analysis, dry-run,
 and frozen reporting execute without an API key or network connection.
 
 The live compatibility gate passed on the authorized revised training canary. The exact
 `gpt-5-mini-2025-08-07` snapshot accepted the original two Responses calls, which exhausted their
 512-output-token allowance, and the corrected 2,048-token call, which returned the exact two-item strict
-batch. The current official model page labels the snapshot deprecated. There is no development pilot or
-power result, so test IDs and the one-time locked comparison are not frozen. No model/provider/tier
-substitution was made.
+batch. The development pilot subsequently completed all 60 children and its provider-disabled replay,
+artifact integrity, request/token/oracle accounting, cost reconciliation, variance analysis, and power
+forecast passed. The user then deliberately waived the planned locked confirmatory test. No
+model/provider/tier substitution was made, no locked registry was frozen, and no test outcome was
+accessed.
 
 ## Contract map
 
@@ -63,6 +66,33 @@ calls and reproduced deterministic summary hash
 `artifacts/reports/PHASE4-LIVE-CANARY-V2/summary.json`, canonical SHA-256
 `5be29b06b2434b771a0301c92fbc66c399b71655403848bff5ac9464a461850f`.
 
+## Development pilot and scientific closeout
+
+`phase4-primary-pilot-v2` completed 60/60 children over ten development tasks, two seeds, and three
+conditions. Each child used 256 charged evaluations. The recorded run contains 3,780 logical calls,
+3,797 physical attempts, 17 bounded schema-failure retries, 14,940 valid and zero invalid proposal
+items, and 15,360 exact-oracle invocations. Provider-disabled replay passed for all 60 children with
+zero proposer/provider calls. Independent artifact/hash audit errors were zero.
+
+The normalized exact-solve AUC means were A/direct `0.2015625`, B/single-incumbent `0.1927734375`, and
+C/uniform-diverse-archive `0.2892578125`, each over 20 paired task/seed rows. H1 (B-A) was not supported:
+estimate `-0.0087890625`, task-clustered 95% interval `[-0.208203125, 0.1470703125]`, Holm-adjusted
+`p=0.9293070693`. H2 (C-B) was positive but inconclusive: estimate `0.096484375`, task-clustered 95%
+interval `[-0.093359375, 0.326171875]`, Holm-adjusted `p=0.7347265273`. H2 is not established.
+
+The pilot's published-rate equivalent is `$6.52323755`; cumulative Phase 4 published-rate equivalent,
+including both canaries, is **$6.5268** (exactly `$6.52680755`). Uncertain usage is zero and no active
+reservation exists. The user separately reported **$4.65** on the provider dashboard. This is an
+**unverified dashboard reconciliation**, because no provider export or invoice was supplied; it does
+not replace or reduce the conservative local ledger.
+
+The original protocol called for a later locked test. After reviewing the pilot and its power/cost
+forecast, the user deliberately waived that test and chose to close Phase 4 with development evidence
+only. This disclosed protocol change is scientifically acceptable, but it leaves H1/H2 unconfirmed and
+cannot be used to call H2 established. The pending declaration remains non-executable with both model
+calls and test-oracle access prohibited. Test-oracle invocations were zero, every access ledger records
+`test_consumed: false`, and test outcomes were never accessed.
+
 ## Safety and authority
 
 Live use requires all of:
@@ -76,7 +106,8 @@ Live use requires all of:
 Fake execution, tests, dry-run, replay, and reports do not read the key or call a provider. A durable
 responded batch can finish offline. A dispatched request without durable response is retained as
 usage-uncertain and is never duplicated. Test authority accepts only a frozen opaque ID set and freeze
-hash; the pending test declaration currently permits neither oracle nor model access.
+hash. No such registry was frozen; the closed test declaration records the user waiver and permits
+neither oracle nor model access.
 
 Retries are restricted to a provider-established zero-usage rate limit or a charged malformed envelope.
 Ambiguous transport usage is terminal. A request that cannot fit its next worst-case reservation stops
@@ -120,12 +151,11 @@ artifact is `artifacts/reports/phase4-fake-smoke-v1/phase4-artifact.json`, SHA-2
 
 Fake H1 and H2 are both zero with degenerate machinery-test intervals, clustered two-sided p-values
 `1.0`, Holm-adjusted p-values `1.0`, and no rejection. They validate null-result export but support no
-scientific inference. Pilot v2's dry run plans 60 children (10 development tasks x two seeds x three
-conditions), 256 evaluations per child, batch size four, and up to 63 logical model calls per child.
-It uses 2,048 output tokens/request and a $0.15 child ceiling; summed child ceilings remain $9.00 under
-the $9.75 development cap. The exact successful canary prerequisite passes record/hash verification.
-An interrupted hash-matched child is resumed without restarting its paid work. The pilot was not run and
-requires separate live authorization.
+scientific inference. Before live execution, pilot v2's dry run planned 60 children (10 development
+tasks x two seeds x three conditions), 256 evaluations per child, batch size four, and up to 63 logical
+model calls per child. It verified the exact successful canary record/hash and all hierarchical budget
+ceilings without hidden access or provider calls. The subsequent authorized live run completed those
+60 children; its results and closeout disposition are recorded above.
 
 Final CI reports 92 files formatted, Ruff clean, strict mypy clean over 64 source files, and 97 tests
 passed. Representative Phase 0, 2, and 3 interrupt/resume/replay/report flows also pass; their replay
@@ -141,4 +171,5 @@ F1/F2 were not added as incidental LLM work. This small 256-semantics universe a
 support claims of broad world-model discovery or LLM superiority.
 
 No cross-task memory, learned primitive, interestingness scheduler, active query, partial observability,
-scaffold modification, or Phase 5-8 mechanism was implemented.
+scaffold modification, or Phase 5-8 mechanism was implemented. In particular, no Phase 5 mechanism has
+been implemented yet.

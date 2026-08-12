@@ -459,3 +459,55 @@ def test_phase4_paid_cost_cap_stops_before_dispatch_and_remains_replayable(
         output_directory=phase2_repository / "phase4-cost-cap-report",
     )
     assert json.loads(report_json.read_text())["results"]["status"] == "cost-cap-exhausted"
+
+
+def test_phase4_dual_budget_cash_cap_stops_before_dispatch(
+    phase2_repository: Path,
+) -> None:
+    dual_policy = phase2_repository / "configs/project-dual-budget-policy-v2.yaml"
+    dual_policy.parent.mkdir(parents=True, exist_ok=True)
+    dual_policy.write_text(
+        Path("configs/project-dual-budget-policy-v2.yaml")
+        .read_text()
+        .replace("billed_nano_usd: 4650000000", "billed_nano_usd: 99999999999")
+    )
+    config = load_config(Path("configs/phase4-openai-canary.yaml"))
+    assert config.cache is not None and config.phase4_policy is not None
+    config = replace(
+        config,
+        cache=replace(config.cache, namespace="phase4-dual-cash-cap"),
+        phase4_policy=replace(
+            config.phase4_policy,
+            price_policy=Path("configs/project-dual-budget-policy-v2.yaml"),
+            ledger=Path("local_state/project-dual-budget-ledger.sqlite3"),
+        ),
+    )
+
+    class NeverDispatchedOpenAI:
+        backend_id = "openai-responses-sdk-v1"
+        provider_id = "openai"
+
+        def __init__(self) -> None:
+            self.dispatch_count = 0
+
+        def dispatch(self, _request: ModelRequest) -> ModelResponse:
+            self.dispatch_count += 1
+            raise AssertionError("dual cash-cap preflight dispatched a provider request")
+
+    backend = NeverDispatchedOpenAI()
+    outcome = start_phase4_run(
+        repository_root=phase2_repository,
+        config=config,
+        config_source="phase4-dual-cash-cap",
+        run_id="phase4-dual-cash-cap",
+        interrupt_after=None,
+        allow_live_model=False,
+        backend=backend,
+    )
+    assert outcome.status == "cost-cap-exhausted"
+    assert backend.dispatch_count == 0
+    manifest = json.loads((outcome.run_directory / "manifest.json").read_text())
+    assert (
+        manifest["budget"]["project_budget_basis"]
+        == "reconciled-cash-plus-unreconciled-published-v1"
+    )

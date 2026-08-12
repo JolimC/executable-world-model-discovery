@@ -426,7 +426,7 @@ def build_manifest(
             "batch_size": config.proposer.batch_size,
             "archive_reserve_size": config.archive.reserve_size,
         }
-        raw["budget"] = {
+        phase4_budget: JsonObject = {
             "version": config.phase4_budget.budget_version,
             "model_requests": config.phase4_budget.model_request_cap,
             "input_tokens": config.phase4_budget.input_token_cap,
@@ -442,6 +442,10 @@ def build_manifest(
             "phase4_nano_usd": price_policy.phase4_cap_nano_usd,
             "stage": config.phase4_policy.stage,
         }
+        if price_policy.cash_budget is not None:
+            phase4_budget["project_budget_basis"] = "reconciled-cash-plus-unreconciled-published-v1"
+            phase4_budget["opening_published_rate_nano_usd"] = price_policy.opening_balance_nano_usd
+        raw["budget"] = phase4_budget
         raw["protocol"] = {
             "condition_id": config.run.condition_id,
             "conditions": {

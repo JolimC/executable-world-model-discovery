@@ -452,8 +452,9 @@ Retry v1 permits at most one identical retry for a rate-limit response with prov
 usage or a malformed envelope whose usage was recorded. Authentication, permission, invalid-request,
 timeout, connection, and server failures are not retried. Ambiguous usage is terminal and retains the
 full reservation. Paid work order is fake, training canary plus offline replay, development pilot plus
-power/cost review, complete freeze, then one locked test. The revised training canary passed; this
-handoff still stops before the development pilot.
+power/cost review, complete freeze, then one locked test. The revised training canary and subsequent
+development pilot passed their engineering, replay, integrity, and accounting gates. DD-031 records the
+user's post-pilot decision to waive the final locked test rather than complete that original sequence.
 
 ## DD-029 — Experiment inference, authority, and record-only artifact
 
@@ -468,10 +469,12 @@ pilot v2 also verifies the exact successful canary configuration and determinist
 declaring itself ready. If the benchmark process is interrupted, an existing hash-matched child without
 terminal results is resumed through the paid-request state machine rather than rejected or restarted.
 
-The test file is intentionally pending and non-executable. Test IDs/sample/seeds/budgets/cache cannot be
-frozen until pilot variance, power, validity, token, and cost evidence fits $20 locked and $30 Phase 4.
-`Phase4Authority.locked_test` is narrow and hash-bound for that future one-time run. Consumed Phase 3
-validation is not reused as confirmation; test outcomes remain unopened.
+The test file was intentionally pending and non-executable. Under the original protocol, test
+IDs/sample/seeds/budgets/cache could be frozen only after pilot variance, power, validity, token, and
+cost evidence fit $20 locked and $30 Phase 4. `Phase4Authority.locked_test` remains narrow and
+hash-bound, but no registry was frozen: following the pilot, the user waived the one-time run and the
+declaration was closed fail-shut. Consumed Phase 3 validation was not reused as confirmation; test
+outcomes remain unopened.
 
 Individual and aggregate artifacts are built from committed records only. They preserve negative/null/
 failure outcomes, cost/token curves, MDL/best-program sources, archive coverage separate from
@@ -494,3 +497,51 @@ No cross-task memory/retrieval, language promotion, learned primitive, interesti
 active query, hidden-state model, scaffold modification, or Phase 5-8 mechanism is implemented. The
 256-semantics F0 universe and small grammar cannot establish broad discovery, transfer, or general LLM
 superiority.
+
+## DD-031 — Phase 4 post-pilot closeout and waived confirmation
+
+The development pilot completed all 60 declared children and passed provider-disabled replay,
+artifact-integrity, request/token/oracle, ledger, and cost reconciliation. H1 (B-A) had a negative point
+estimate and was not supported. H2 (C-B) had a positive point estimate, but its task-clustered interval
+crossed zero and its Holm-adjusted test did not reject; it is positive but inconclusive, not established.
+
+Cumulative Phase 4 usage is recorded conservatively as a **$6.5268 published-rate equivalent** (exact
+ledger value `$6.52680755`), with zero uncertain usage and no active reservation. The user's separately
+reported provider-dashboard value of **$4.65** is retained only as an **unverified dashboard
+reconciliation**. No provider export or invoice was supplied, so that observation does not rewrite the
+versioned ledger or its hard-cap semantics.
+
+After reviewing the pilot and power/cost forecast, the user deliberately waived the original protocol's
+locked confirmatory test. The pending declaration is retained but closed as
+`skipped-by-user-after-development-pilot`, with model calls and test-oracle access prohibited. No test
+registry was frozen, no locked child was run, and test outcomes were never accessed. Closing with
+development evidence is scientifically acceptable when disclosed as this protocol change, but H1/H2
+remain unconfirmed and H2 must not be described as established.
+
+This closeout remains limited to F0. No cross-task memory, learned primitive, interestingness scheduler,
+or other Phase 5 mechanism has been implemented yet.
+
+## DD-032 — Versioned published-rate and provider-cash budget separation
+
+The closed Phase 4 policy, ledger, run artifacts, hashes, and `$6.52680755` published-rate result remain
+unchanged. A separate `published-rate-and-reconciled-cash-v2` policy and schema-v2 project ledger carry
+that published amount forward alongside the user's `$4.65` observation, explicitly labeled
+`user-reported-unverified`.
+
+Every response remains priced and recorded at the frozen published rate for reproducibility. Project
+cash authorization instead uses the latest append-only provider-billed checkpoint plus all later
+published-rate actual cost, uncertain exposure, active reservations, and any configured safety buffer.
+Every request is still reserved at full published rates, and the existing request, child, stage, and
+experiment exposure caps remain in force. A cash checkpoint can release future personal-budget
+headroom; it cannot rewrite scientific cost or presume that a promotion continues.
+
+Checkpoint coverage is monotone in local reservation sequence and may not include active or uncertain
+usage. Cash observations retain scope, observation time, source, verification level, content hash, and
+recording time. Decreases require explicit refund/correction authorization. Concurrent reservations and
+checkpoints use the same immediate SQLite transaction boundary, so their cash-exposure decisions cannot
+race past the `$100` ceiling.
+
+Cost reconciliation may alter future authorization between experiments, not the design or sample count
+inside a frozen comparison. This is project accounting infrastructure only; it implements no Phase 5
+memory or search mechanism. Operational commands and recovery boundaries are documented in
+`docs/dual_budget_policy.md`.

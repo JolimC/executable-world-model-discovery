@@ -23,7 +23,7 @@ from world_model_search.dsl.versions import (
 )
 from world_model_search.errors import ConfigurationError
 from world_model_search.model.cache import CACHE_VERSION
-from world_model_search.model.policy import PRICE_POLICY_VERSION
+from world_model_search.model.policy import SUPPORTED_PRICE_POLICY_VERSIONS
 from world_model_search.model.prompts import (
     DIRECT_PROMPT_VERSION,
     FEEDBACK_SCHEMA_VERSION,
@@ -984,7 +984,7 @@ def load_config(path: Path) -> AppConfig:
         from world_model_search.model.policy import load_price_policy
 
         policy = load_price_policy(Path.cwd() / config.phase4_policy.price_policy)
-        if policy.policy_version != PRICE_POLICY_VERSION:
+        if policy.policy_version not in SUPPORTED_PRICE_POLICY_VERSIONS:
             raise ConfigurationError("Phase 4 price policy version is invalid")
         if config.phase4_budget is None or config.model is None:
             raise AssertionError("validated Phase 4 config is incomplete")

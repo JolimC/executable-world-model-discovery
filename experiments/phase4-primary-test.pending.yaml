@@ -1,8 +1,9 @@
-# Deliberately not executable and not a schema-2 registry. The one-time test task IDs,
-# sample size, seeds, and cache namespace may be frozen only after live pilot variance,
-# power, validity, token, and cost evidence pass the declared $20/$30 gates.
-status: blocked-awaiting-development-pilot
+# Deliberately not executable and not a schema-2 registry. The original protocol would
+# have frozen one-time test task IDs, sample size, seeds, and cache namespace only after
+# reviewing the development pilot. The user waived that confirmatory test after the
+# pilot, so no locked registry was frozen and the test authority remains disabled.
+status: skipped-by-user-after-development-pilot
 test_oracle_access_permitted: false
 model_calls_permitted: false
-reason: revised live canary passed; development pilot and power/cost freeze are not completed
+reason: locked confirmatory test waived; Phase 4 closes with development evidence only
 required_freeze: code-lock-price-ledger-model-prompt-schema-registry-analysis-report-v1

@@ -7,5 +7,6 @@
 /.ruff_cache/
 /artifacts/
 /local_state/
+/private_backups/
 __pycache__/
 *.py[cod]
