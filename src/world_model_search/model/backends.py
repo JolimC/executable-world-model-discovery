@@ -12,16 +12,16 @@ from typing import Any
 from world_model_search.model.types import (
     ModelBackend,
     ModelDispatchError,
+    ModelDispatchRequest,
     ModelError,
     ModelErrorCategory,
-    ModelRequest,
     ModelResponse,
     ModelUsage,
 )
 from world_model_search.serialization import canonical_json
 
 
-def _default_scripted_text(request: ModelRequest) -> str:
+def _default_scripted_text(request: ModelDispatchRequest) -> str:
     asts = (
         {"op": "Xor", "left": {"op": "At", "offset": -1}, "right": {"op": "At", "offset": 1}},
         {"op": "Parity", "mask": [-1, 0, 1]},
@@ -51,7 +51,7 @@ class ScriptedBackend:
         self._script = tuple(script)
         self.dispatch_count = 0
 
-    def dispatch(self, request: ModelRequest) -> ModelResponse:
+    def dispatch(self, request: ModelDispatchRequest) -> ModelResponse:
         index = self.dispatch_count
         self.dispatch_count += 1
         scripted: ModelResponse | ModelError | str = (
@@ -88,7 +88,7 @@ class RecordedResponseBackend:
         if len(self._responses) != len(responses):
             raise ValueError("recorded responses require unique request hashes")
 
-    def dispatch(self, request: ModelRequest) -> ModelResponse:
+    def dispatch(self, request: ModelDispatchRequest) -> ModelResponse:
         try:
             return self._responses[request.request_hash]
         except KeyError as exc:
@@ -104,7 +104,7 @@ class OfflineResumeBackend:
         self.backend_id = backend_id
         self.provider_id = provider_id
 
-    def dispatch(self, request: ModelRequest) -> ModelResponse:
+    def dispatch(self, request: ModelDispatchRequest) -> ModelResponse:
         del request
         raise ModelDispatchError(
             ModelError(ModelErrorCategory.PERMISSION, retryable=False, usage_uncertain=False)
@@ -140,7 +140,7 @@ class OpenAIResponsesBackend:
             raise ModelDispatchError(ModelError(ModelErrorCategory.AUTHENTICATION, False, False))
         self._api_key = key
 
-    def dispatch(self, request: ModelRequest) -> ModelResponse:
+    def dispatch(self, request: ModelDispatchRequest) -> ModelResponse:
         if request.endpoint != "v1/responses":
             raise ModelDispatchError(ModelError(ModelErrorCategory.INVALID_REQUEST, False, False))
         started = perf_counter_ns()

@@ -29,11 +29,20 @@ $6.5268 at the frozen published-rate policy, with zero uncertain usage and no ac
 user separately reported $4.65 from the provider dashboard; that value is an unverified dashboard
 reconciliation, not a replacement for the conservative local ledger.
 
-**Engineering complete; development pilot complete; confirmatory locked test waived; H1/H2 remain
-unconfirmed.** Waiving the locked test is a disclosed protocol change from the original plan. No locked
-test registry was frozen or run, test outcomes were never accessed, and the test declaration remains
-fail-closed. Evidence is F0-only. Cross-task memory, learned primitives, interestingness schedulers,
-active queries, and other Phase 5+ mechanisms remain absent; no Phase 5 mechanism has been implemented.
+**Phase 5 engineering and its no-cost smoke are complete.** The repository now adds a separate typed
+SQLite memory, capability-safe deterministic retrieval, an exactly coded zero-arity learned-primitive
+language, a predeclared structural-family F0 transfer benchmark, strict C/D prompt and manifest
+isolation, provider-disabled replay, and a transfer-matrix report. One primitive passed the no-cost
+development promotion gate (+46 net bits after charging its 50-bit definition once). The paired
+two-seed recoding smoke is machinery evidence only because it reuses those development families; it is
+not an H3 test. No live Phase 5 call or sealed-test access occurred, and H3 remains unconfirmed. Phase 6
+interestingness, active queries, hidden state, and self-modifying search remain absent.
+
+The next-stage Phase 5 training canary and matched C/D development pilot are now implemented and
+content-frozen, but their separate authority files still deny model and oracle access. Provider-disabled
+preflights reserve at most one canary request (`$0.007096`) and 256 development requests (`$1.816576`).
+The development runner additionally refuses to start until it can verify a recorded successful Phase 5
+canary. Preparing these files made no provider call and is not authorization to run either stage.
 
 ## Quick start
 
@@ -66,6 +75,19 @@ uv run --locked wms benchmark --experiment experiments/phase4-fake-smoke.yaml
 uv run --locked wms benchmark \
   --experiment experiments/phase4-primary-pilot.yaml --dry-run
 uv run --locked wms baseline random --config configs/phase4-fake-smoke.yaml --count 256
+
+# Phase 5 family audit, no-cost C/D smoke, and provider-disabled replay:
+uv run --locked wms phase5 dry-run
+uv run --locked wms phase5 smoke
+uv run --locked wms phase5 replay
+
+# Provider-disabled validation of the frozen next-stage designs:
+uv run --locked wms phase5 live-dry-run \
+  --experiment experiments/phase5-canary.yaml \
+  --authority experiments/phase5-canary.pending.yaml
+uv run --locked wms phase5 live-dry-run \
+  --experiment experiments/phase5-development.yaml \
+  --authority experiments/phase5-development.pending.yaml
 
 # The Phase 0 mock lifecycle remains available:
 uv run wms solve --config configs/smoke.yaml --proposer mock --run-id smoke
@@ -102,4 +124,6 @@ Run the complete local CI command with `./scripts/ci.sh`. See
 [`docs/design_decisions.md`](docs/design_decisions.md) for the frozen Phase 0-4 contracts. The
 post-Phase-4 [dual-budget policy](docs/dual_budget_policy.md) preserves published-rate scientific
 accounting while enforcing the user's personal `$100` ceiling against reconciled provider cash plus
-worst-case unreconciled exposure.
+worst-case unreconciled exposure. See the
+[`Phase 5 implementation report`](docs/phase5_implementation_report.md) for gate evidence, no-cost
+results, limitations, and the pending live-authorization boundary.

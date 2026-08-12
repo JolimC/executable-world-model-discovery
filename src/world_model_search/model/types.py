@@ -39,6 +39,52 @@ class ModelErrorCategory(StrEnum):
     UNKNOWN = "unknown"
 
 
+@runtime_checkable
+class ModelDispatchRequest(Protocol):
+    """Structural request boundary shared by frozen Phase 4 and Phase 5 identities."""
+
+    @property
+    def backend_id(self) -> str: ...
+
+    @property
+    def provider_id(self) -> str: ...
+
+    @property
+    def resolved_model(self) -> str: ...
+
+    @property
+    def endpoint(self) -> str: ...
+
+    @property
+    def service_tier(self) -> str: ...
+
+    @property
+    def rendered_input(self) -> str: ...
+
+    @property
+    def structured_schema_name(self) -> str: ...
+
+    @property
+    def structured_schema(self) -> JsonObject: ...
+
+    @property
+    def requested_batch_size(self) -> int: ...
+
+    @property
+    def settings(self) -> JsonObject: ...
+
+    @property
+    def role(self) -> ProposalRole: ...
+
+    @property
+    def request_hash(self) -> str: ...
+
+    @property
+    def conservative_input_token_bound(self) -> int: ...
+
+    def identity_value(self) -> JsonObject: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ModelUsage:
     """Provider-normalized token usage; reasoning is a subset of output."""
@@ -383,4 +429,4 @@ class ModelBackend(Protocol):
     backend_id: str
     provider_id: str
 
-    def dispatch(self, request: ModelRequest) -> ModelResponse: ...
+    def dispatch(self, request: ModelDispatchRequest) -> ModelResponse: ...

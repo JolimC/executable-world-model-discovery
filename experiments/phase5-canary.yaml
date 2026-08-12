@@ -1,0 +1,68 @@
+experiment_schema_version: 1
+experiment_version: phase5-live-cd-experiment-v1
+experiment_id: phase5-live-training-canary-v1
+status: frozen-pending-user-authorization
+stage: training-canary
+transfer_registry: configs/phase5-transfer-split-v1.yaml
+transfer_registry_hash: 9c34f0675ead5d9f534a0f325504fd40360abb2ccf35bcd20bebdfb38d6741ce
+exposure_policy: configs/phase5-exposure-policy-v2.yaml
+exposure_policy_hash: 9b264074674f64372d003eb58029c0d38d6a363e356f672ff009aba658451716
+frozen_memory:
+  snapshot: experiments/phase5-freeze/memory-snapshot.json
+  snapshot_hash: 9ab7e6ced0cdaa7a2764edd9638b1e5d2af781d511343ecf05a420408fd7bad4
+  snapshot_artifact_hash: e8600b3c947ad362403a3ade57eca76cf1d312171a362cb754576ad0ed57867c
+  primitive_registry: experiments/phase5-freeze/primitive-registry.json
+  primitive_registry_hash: 6ba9aed68b5e4234abc889a03ec899b75d38f7bbea01d222005ac42fa248badb
+  primitive_registry_artifact_hash: ed8193591cfc3327e82f6df3edcc315210bd111d80e28875106597ed8188b924
+conditions: [condition-d-typed-memory-v1]
+task_selection:
+  split: training
+  task_ids: [3dff430e6769eb637d5dcf1b]
+search_seeds: [54001]
+matched_contract:
+  algorithm: independent-bounded-proposal-search-v1
+  scheduler: uniform-request-index-v1
+  backend: openai-responses-sdk-v1
+  provider: openai
+  model: gpt-5-mini-2025-08-07
+  endpoint: v1/responses
+  service_tier: default
+  reasoning_effort: low
+  max_output_tokens: 2048
+  batch_size: 1
+  requests_per_child: 1
+  input_token_cap: 12000
+  output_token_cap: 2048
+  total_token_cap: 14048
+  proposal_item_cap: 1
+  oracle_call_cap: 1
+  continue_after_first_exact: true
+  prompt_template: phase5-public-task-with-explicit-memory-v1
+  response_schema: world_model_candidate_batch_v1-with-frozen-primitives
+retrieval:
+  max_items: 4
+  max_bytes: 4096
+  max_tokens: 4096
+storage:
+  output_root: artifacts/phase5/live-canary-v1
+  cache_root: artifacts/phase5/live-cache
+  cache_namespace: phase5-live-canary-v1
+  cash_ledger: local_state/project-dual-budget-ledger.sqlite3
+prerequisite_canary: null
+analysis:
+  primary_endpoint: net-held-out-two-part-code-length-gain
+  secondary_endpoints:
+    - matched-search-quality
+    - retrieval-precision
+    - primitive-transfer-gain-by-target-family
+    - runtime
+    - model-token-usage
+    - published-rate-equivalent-cost
+    - reconciled-actual-cash
+  pairing: exact-task-id-and-search-seed-v1
+  uncertainty: family-stratified-task-cluster-bootstrap-v1
+  bootstrap_seed: 56001
+  bootstrap_replicates: 10000
+  confidence_level: 95
+  multiplicity: holm-two-sided-across-predeclared-secondary-comparisons-v1
+scientific_role: compatibility-only-not-scientific-evidence

@@ -1,0 +1,44 @@
+registry_version: phase5-f0-structural-transfer-registry-v1
+registry_id: phase5-f0-structural-transfer-v1
+master_seed: 51001
+output_root: artifacts/phase5/transfer-benchmark-v1
+families:
+  - family_id: selector-source-xor-v1
+    role: training
+    generator: selector-source-xor-v1
+    variants: [center, not-center]
+  - family_id: selector-source-and-v1
+    role: training
+    generator: selector-source-and-v1
+    variants: [left, not-left]
+  - family_id: selector-target-or-v1
+    role: development
+    generator: selector-target-or-v1
+    variants: [right, not-right]
+  - family_id: selector-target-not-xor-v1
+    role: development
+    generator: selector-target-not-xor-v1
+    variants: [left, right]
+  - family_id: selector-test-not-and-v1
+    role: test
+    generator: selector-test-not-and-v1
+    variants: [center, right]
+  - family_id: selector-test-gated-v1
+    role: test
+    generator: selector-test-gated-v1
+    variants: [left, not-center]
+endpoints:
+  - net-held-out-two-part-code-length-gain
+  - matched-search-quality
+  - retrieval-precision
+  - primitive-transfer-gain-by-target-family
+  - runtime
+  - model-token-usage
+  - published-rate-equivalent-cost
+  - reconciled-actual-cash
+exclusions:
+  - semantic-duplicates-across-all-roles
+  - phase2-all-256-analysis
+  - phase3-consumed-validation
+  - phase4-development-pilot
+sealed_test_authorized: false

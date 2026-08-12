@@ -491,3 +491,65 @@ Phase 4 adds no cross-task memory, learned primitive, interestingness/UCB schedu
 hidden state, scaffold mutation, or Phase 5-8 claim. No Phase 5 mechanism has been implemented yet.
 The live pilot is development evidence only—not confirmation of H1/H2, broad discovery, transfer, or
 general model superiority.
+
+## Phase 5 — cross-task memory and learned primitives
+
+Status: **engineering complete; deterministic no-cost smoke complete; one primitive promoted on the
+predeclared development gate; live training canary passed and provider-disabled replay verified;
+live-development pilot remains frozen and unauthorized; sealed test untouched; H3 unconfirmed.**
+
+The Phase 5 prerequisite is `configs/phase5-transfer-split-v1.yaml`: six structural reference-grammar
+families wholly partitioned into two training, two development, and two sealed-test families. Its twelve
+tasks have twelve unique exhaustive semantic identities. Family/reference/semantic metadata is
+evaluator-only; public tasks retain the F0 `PublicTask` contract. This does not convert the old one-family
+ECA corpus into multiple families and does not establish F1/F2 or physical transfer.
+
+The no-cost development primitive gate evaluated four tasks from two families. All expansions were
+exact. Baseline programs cost 192 bits, learned invocation programs 96 bits, gross savings were 96 bits,
+and the complete frozen library cost 50 bits, yielding **+46 net bits** after one definition charge. The
+primitive was therefore promoted for subsequent machinery use. The paired two-seed C/D smoke contains
+eight pairs (sixteen condition rows), reports 384 versus 192 program bits and +142 aggregate net bits
+after the same one-time charge, and has retrieval precision 1.0. Because those paired rows reuse the
+promotion families, the result is a mechanism smoke, not an independent test of H3.
+
+Provider-disabled replay verified all artifact, memory, retrieval, request, primitive, prompt,
+evaluation, budget, cost, matrix, analysis, and report identities with zero provider calls and zero
+sealed-test accesses. The final smoke report hash is
+`520d937e70d4220bb161e5df98486c3a5c793ddbdd26aaa7b90d2df08696463e`;
+the summary hash is `31d9f724227475fd244bc291248407fc93a615daaa68f9a71e2acca702f53c9e`.
+
+The ledger now records $6.52762830 cumulative published-rate usage: the carried $6.52680755 plus
+$0.00082075 for the canary. The sole provider-dashboard checkpoint remains $4.65 reconciled actual cash,
+marked user-reported/unverified; the canary amount is unreconciled until a later dashboard checkpoint.
+Uncertainty and active reservations are both $0, and authorizable cash headroom is $95.34917925.
+`phase5-published-exposure-partition-v2` reserves a separate `$0.01` training-canary stage inside the
+unchanged `$15` Phase 5 total. The frozen development pilot has four development tasks, two seeds,
+matched C/D ordering, sixteen requests per child, sixteen children, and a `$1.816576` maximum.
+
+The authorized canary made exactly one physical provider call and returned one schema-valid candidate
+with zero invalid candidates and zero sealed-test accesses. It used 1,587 input and 212 output tokens,
+including 64 reasoning tokens, on the requested model and default service tier. Its terminal status is
+`passed-live-training-canary`. Provider-disabled replay then verified the saved summary and request
+identities with zero provider calls; its summary hash is
+`bab716de3f2c744ed7073a11731dc402881e6c8fdd9c6c0fe36d516d0a03f58c`.
+
+Both provider-disabled preflights pass, with maximum constructed request-identity bounds of 8,580 bytes
+for the canary and 8,583 for development under the conservative 12,000-token bound. The exact deprecated
+`gpt-5-mini-2025-08-07` snapshot, Responses endpoint, default tier, low reasoning, 2,048 output cap,
+frozen memory snapshot, primitive registry, schemas, and analysis plan are hash-bound. The development
+authority still denies every capability, and no development artifact exists. The sealed test remains
+unauthorized and untouched.
+
+Gate disposition:
+
+| Gate | Disposition |
+|---|---|
+| Preservation/backward compatibility | Pass: all 130 Phase 0-5 tests pass; frozen Phase 0-4 contracts remain readable |
+| Family protocol/leakage | Pass for training/development smoke; sealed test access remains zero |
+| Typed-memory integrity | Pass: schema/content/provenance/scope/bounds/counterevidence/corruption tests |
+| Primitive promotion/MDL | Pass on predeclared development gate: +46 net bits, exact correctness |
+| Matched isolation | Pass for deterministic smoke; only declared memory/retrieval/registry fields differ |
+| Scope/contradiction | Pass in executable positive, counterevidence, scoped/rejected, zero/negative tests |
+| Replay/report | Pass: provider-disabled replay reproduces the +142 smoke aggregate and verifies the live canary bundle |
+| Budget authority | Pass: canary used one authorized call; development and sealed test remain unauthorized |
+| Scientific status | Pass: F0 development gate and smoke labels only; H3 unconfirmed |

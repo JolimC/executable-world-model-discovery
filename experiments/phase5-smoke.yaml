@@ -1,0 +1,67 @@
+experiment_schema_version: 1
+experiment_version: phase5-matched-c-versus-d-v1
+experiment_id: phase5-no-cost-smoke-v1
+status: deterministic-development-smoke
+transfer_registry: configs/phase5-transfer-split-v1.yaml
+output_root: artifacts/phase5/no-cost-smoke-v1
+data_roles:
+  primitive_training: training
+  primitive_promotion: development
+  paired_evaluation: development
+  confirmatory_test: sealed
+conditions: [condition-c-empty-memory-v1, condition-d-typed-memory-v1]
+search_seeds: [52001, 52002]
+matched_contract:
+  base_search_algorithm: deterministic-typed-recoding-smoke-v1
+  scheduler: uniform-sorted-task-v1
+  candidate_cap: 1
+  oracle_call_cap: 1
+  model_request_cap: 0
+  stopping_rule: one-exact-recoding-candidate-v1
+  prompt_template: phase5-public-task-with-explicit-memory-v1
+  response_schema: world-model-candidate-batch-with-primitives-v1
+  model: gpt-5-mini-2025-08-07
+  endpoint: v1/responses
+  service_tier: default
+  reasoning_effort: low
+  max_output_tokens: 2048
+retrieval:
+  max_items: 4
+  max_bytes: 4096
+  max_tokens: 4096
+primitive_gate:
+  minimum_training_tasks: 2
+  minimum_training_families: 2
+  minimum_development_tasks: 2
+  minimum_development_families: 2
+  require_exact_correctness: true
+  require_strictly_positive_net_gain: true
+analysis:
+  primary_endpoint: net-held-out-two-part-code-length-gain
+  secondary_endpoints:
+    - matched-search-quality
+    - retrieval-precision
+    - primitive-transfer-gain-by-target-family
+    - runtime
+    - model-token-usage
+    - published-rate-equivalent-cost
+    - reconciled-actual-cash
+  pairing: exact-task-id-and-search-seed-v1
+  uncertainty: family-stratified-task-cluster-bootstrap-v1
+  bootstrap_seed: 53001
+  bootstrap_replicates: 1000
+  confidence_level: 95
+  multiplicity: holm-two-sided-across-predeclared-secondary-comparisons-v1
+spending:
+  exposure_policy: configs/phase5-exposure-policy-v1.yaml
+  cash_policy: configs/project-dual-budget-policy-v2.yaml
+  cash_ledger: local_state/project-dual-budget-ledger.sqlite3
+  live_input_token_bound_per_request: 12000
+  live_requests_per_child: 16
+  live_child_count: 16
+  live_runtime_bound_seconds: 7200
+authorization:
+  live_model: false
+  development_oracle_for_smoke: true
+  sealed_test_oracle: false
+scope_statement: structured-transfer-within-f0-not-f1-f2-or-physical-worlds

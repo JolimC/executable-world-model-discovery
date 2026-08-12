@@ -1,0 +1,16 @@
+declaration_version: phase5-sealed-test-declaration-v1
+declaration_id: phase5-sealed-test-v1
+status: sealed-not-authorized
+data_role: confirmatory-test
+transfer_registry: configs/phase5-transfer-split-v1.yaml
+transfer_registry_hash: 9c34f0675ead5d9f534a0f325504fd40360abb2ccf35bcd20bebdfb38d6741ce
+analysis_plan_hash: pending-development-freeze
+memory_snapshot_hash: pending-development-freeze
+primitive_registry_hash: pending-development-freeze
+exposure_policy: configs/phase5-exposure-policy-v2.yaml
+exposure_policy_hash: 9b264074674f64372d003eb58029c0d38d6a363e356f672ff009aba658451716
+authorization:
+  model_calls: false
+  test_oracle: false
+  one_time_authority_hash: null
+fail_closed: true

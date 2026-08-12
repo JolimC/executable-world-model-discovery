@@ -1,0 +1,14 @@
+authority_version: phase5-live-authority-v1
+authority_id: phase5-live-training-canary-authority-v1
+status: authorized
+experiment: experiments/phase5-canary.yaml
+experiment_hash: 09d543e54bf61149f7fb167c259ed6b31a9ac1508756c3a3c3849fa8270546b6
+exposure_policy: configs/phase5-exposure-policy-v2.yaml
+exposure_policy_hash: 9b264074674f64372d003eb58029c0d38d6a363e356f672ff009aba658451716
+authorization:
+  model_calls: true
+  oracle_access: true
+  user_reviewed_exposure_policy: true
+  user_authorized_live_run: true
+authorization_evidence: user-message-2026-08-12-authorize-and-run-only-the-canary
+fail_closed: true

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from world_model_search.errors import PersistenceError
-from world_model_search.model.types import ModelRequest, ModelResponse
+from world_model_search.model.types import ModelDispatchRequest, ModelResponse
 from world_model_search.persistence.artifacts import write_content_artifact
 from world_model_search.serialization import JsonObject, canonical_json, sha256_text
 
@@ -24,10 +24,10 @@ class ExactResponseCache:
         self.root = root
         self.namespace = namespace
 
-    def _path(self, request: ModelRequest) -> Path:
+    def _path(self, request: ModelDispatchRequest) -> Path:
         return self.root / self.namespace / f"{request.request_hash}.json"
 
-    def get(self, request: ModelRequest) -> ModelResponse | None:
+    def get(self, request: ModelDispatchRequest) -> ModelResponse | None:
         path = self._path(request)
         if not path.exists():
             return None
@@ -54,7 +54,7 @@ class ExactResponseCache:
         except (KeyError, TypeError, ValueError) as exc:
             raise PersistenceError("model response cache fields are corrupt") from exc
 
-    def put(self, request: ModelRequest, response: ModelResponse) -> str:
+    def put(self, request: ModelDispatchRequest, response: ModelResponse) -> str:
         if response.request_hash != request.request_hash:
             raise ValueError("cannot cache a response for another request")
         content = response.deterministic_value()

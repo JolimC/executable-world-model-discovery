@@ -545,3 +545,92 @@ Cost reconciliation may alter future authorization between experiments, not the 
 inside a frozen comparison. This is project accounting infrastructure only; it implements no Phase 5
 memory or search mechanism. Operational commands and recovery boundaries are documented in
 `docs/dual_budget_policy.md`.
+
+## DD-033 — Phase 5 structural-family prerequisite within F0
+
+The all-256 ECA corpus has one genuine internal family and therefore cannot support family-held-out
+transfer. Phase 5 does not relabel ECA rules, task IDs, seeds, descriptors, archive cells, or semantic
+bins as families. `phase5-f0-structural-transfer-v1` instead predeclares six canonical reference-grammar
+strata: two source-training, two development, and two sealed-test structural generators. Each family is
+defined by its constructor grammar before evaluation, is assigned wholly to one role, and generates two
+variants. The complete eight-case semantic identity check proves all twelve tasks distinct across roles.
+
+Family, generator, reference AST, ECA realization, semantics, and split proof stay in evaluator-only
+artifacts. The public artifact retains the Phase 2 mechanics and uniform-only demonstrations, and
+`PublicTask` remains the proposer boundary. Phase 2 all-256 analysis, consumed Phase 3 validation, and
+the Phase 4 development pilot are explicitly excluded from admission. This is structured transfer
+within F0 only; it says nothing about F1/F2 or physical-world transfer.
+
+## DD-034 — Separate typed memory and capability-safe retrieval
+
+Phase 5 uses a new schema-1 SQLite database, not a Phase 4 run database or budget ledger. Metadata binds
+the split registry and evidence catalog. Evidence, typed records, evidence links, and lifecycle events
+are content addressed; proposal, scoping, promotion, rejection, and invalidation are append-only.
+Admission verifies immutable task/run/candidate/evaluation/artifact provenance. Independent support is
+counted by distinct task and family, so retries, seeds, cache hits, and duplicate evidence do not inflate
+the promotion gate. Counterevidence blocks global promotion and invalidates a promoted record.
+
+Frozen snapshots expose only record identity, typed kind, bounded proposer text, public scope, and public
+applicability. Deterministic retrieval accepts only `PublicTask`, the snapshot, explicit public search
+state, and item/byte/token bounds. It records query identity, eligible records, scores, stable ordering,
+selection, exclusions, rendered bytes, and snapshot identity. Family labels, semantics, artifact paths,
+oracle handles, and reference programs never enter the prompt.
+
+## DD-035 — Exactly coded learned primitives and one-time MDL charge
+
+The learned language is a frozen list of typed zero-arity `BitExpr` definitions. Definitions are
+canonical base-DSL ASTs and cannot contain arbitrary code, evaluator capabilities, `TruthTable`, or a
+semantic equivalent of existing `Parity`/`Majority` macros. Calls expand hygienically and
+deterministically before canonicalization and oracle evaluation. A reserved prefix opcode plus Elias
+gamma invocation index is uniquely decodable; the counted, length-delimited library code is also exact
+and round-trips bit for bit.
+
+Promotion requires distinct source-training tasks/families, a frozen split/language/analysis plan,
+distinct development tasks/families, exact correctness, no counterevidence, and strictly positive
+`base - (definition + learned programs)` gain. Definition cost is charged once to the complete library
+and displayed separately from matrix cells. Null and negative gates produce an empty registry or a
+rejected/scoped record without changing thresholds.
+
+## DD-036 — Phase 5 matched smoke, evidence status, and authority
+
+Conditions C and D use one prompt template. The C memory block and primitive registry are genuinely
+empty; D receives the recorded retrieval and frozen registry. Exact condition-manifest differencing
+permits only condition identity, memory snapshot, retrieval/rendered-memory hashes, and primitive
+registry to differ. Tasks, order, seeds, algorithm, scheduler, stopping rule, prompt outside those
+blocks, model snapshot/settings, schema, caps, budget policy, and code/config identity match.
+
+The deterministic smoke uses zero model requests and one exact evaluation per condition/task/seed. Its
+primitive development gate is legitimate development evidence for that library: 192 base bits versus
+96 invocation-program bits, 96 gross saved, 50 definition bits charged once, and +46 net bits with all
+four tasks correct across two development families. The subsequent two-seed C/D recoding smoke reports
++142 net bits but reuses the promotion families; it verifies machinery and is not an independent H3
+test. H3 remains unconfirmed. The sealed-test declaration denies model and oracle access.
+
+Phase 5 published exposure has a separate pending partition layered over the immutable Phase 4 ledger
+and v2 cash controller. Its conservative live-development forecast is 256 requests, 12,000 input-bound
+and 2,048 output tokens each, at most 7,200 seconds and $1.816576 published-rate equivalent. With the
+current unverified $4.65 cash checkpoint, the worst-case cash upper bound would be $6.466576, below
+$100. Fit is not authorization: the exposure policy and live development run both require explicit user
+review and authorization between frozen experiment boundaries.
+
+## DD-037 — Frozen Phase 5 canary and live-development boundary
+
+Phase 5 paid-work preparation uses `phase5-published-exposure-partition-v2`, which preserves the parent
+v2 cash-controller identity and the `$15` total while explicitly partitioning `$0.01` for a one-request
+training compatibility canary, `$5` for development, and `$9.99` for the still-sealed test. The ledger
+audit found the same sole unverified `$4.65` checkpoint, zero uncertainty, zero reservations, and
+`$95.35` current cash headroom. Forecast fit does not grant authority.
+
+The canary and development designs are immutable experiment registries; user authority is a separate
+hash-binding declaration so an authorization change cannot mutate tasks, conditions, prompts, model,
+caps, or analysis. Both pending declarations deny model calls and oracle access. The canary uses one
+source-training task, one seed, condition D, and one request solely to test the complete Phase 5 prompt,
+primitive schema, exact deprecated model snapshot, response parsing, accounting, artifact, and replay
+path. At least one schema-valid candidate is required to pass; its outcome is not scientific evidence.
+
+The development pilot fixes four tasks across the two already-consumed development families, two seeds,
+C/D rotating order, and sixteen independent requests per child (256 total). C and D differ only in the
+recorded memory/retrieval block and frozen learned-primitive registry. Development execution is blocked
+until a successful canary summary bound to the exact canary registry exists. Because these families were
+already used for primitive promotion, the pilot can validate model behavior, costs, and matched search
+effects but cannot independently confirm H3. The later sealed test remains the only confirmatory path.

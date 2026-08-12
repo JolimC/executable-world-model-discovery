@@ -530,6 +530,8 @@ class ProjectLedger:
         request_hash: str,
         amount_nano_usd: int,
         child_cap_nano_usd: int,
+        phase_cap_override_nano_usd: int | None = None,
+        stage_cap_override_nano_usd: int | None = None,
     ) -> None:
         if amount_nano_usd < 0:
             raise PersistenceError("request reservation cannot be negative")
@@ -568,9 +570,19 @@ class ProjectLedger:
                 (run_id,),
             )
             project_committed = self.policy.opening_balance_nano_usd + phase_committed
+            phase_cap = self.policy.phase4_cap_nano_usd
+            stage_cap = self.policy.stage_cap(stage)
+            if phase_cap_override_nano_usd is not None:
+                if phase_cap_override_nano_usd < 0:
+                    raise PersistenceError("phase exposure override cannot be negative")
+                phase_cap = min(phase_cap, phase_cap_override_nano_usd)
+            if stage_cap_override_nano_usd is not None:
+                if stage_cap_override_nano_usd < 0:
+                    raise PersistenceError("stage exposure override cannot be negative")
+                stage_cap = min(stage_cap, stage_cap_override_nano_usd)
             checks = [
-                (phase_committed + amount_nano_usd, self.policy.phase4_cap_nano_usd),
-                (stage_committed + amount_nano_usd, self.policy.stage_cap(stage)),
+                (phase_committed + amount_nano_usd, phase_cap),
+                (stage_committed + amount_nano_usd, stage_cap),
                 (child_committed + amount_nano_usd, child_cap_nano_usd),
             ]
             if self.policy.uses_reconciled_cash_budget:

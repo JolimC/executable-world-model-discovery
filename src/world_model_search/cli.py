@@ -27,6 +27,18 @@ from world_model_search.evaluation.phase4_experiment import (
     phase4_dry_run,
     run_phase4_experiment,
 )
+from world_model_search.evaluation.phase5_experiment import (
+    is_phase5_experiment,
+    load_phase5_experiment,
+    phase5_dry_run,
+    replay_phase5_smoke,
+    run_phase5_smoke,
+)
+from world_model_search.evaluation.phase5_live import (
+    phase5_live_dry_run,
+    replay_phase5_live_experiment,
+    run_phase5_live_experiment,
+)
 from world_model_search.evaluation.random_baseline import run_random_baseline
 from world_model_search.evaluation.report import create_recorded_report
 from world_model_search.logging import configure_logging
@@ -160,6 +172,33 @@ def _parser() -> argparse.ArgumentParser:
     coverage.add_argument("--through-sequence", type=int)
     coverage.add_argument("--through-current-finalized", action="store_true")
     cash.add_argument("--allow-decrease", action="store_true")
+
+    phase5 = commands.add_parser("phase5", help="no-cost Phase 5 accumulation experiment")
+    phase5_commands = phase5.add_subparsers(dest="phase5_command", required=True)
+    for name, help_text in (
+        ("dry-run", "validate split, authority, budget, and forecast"),
+        ("smoke", "run the deterministic no-provider C/D smoke"),
+        ("replay", "replay the smoke from frozen artifacts"),
+    ):
+        command = phase5_commands.add_parser(name, help=help_text)
+        command.add_argument(
+            "--experiment", type=Path, default=Path("experiments/phase5-smoke.yaml")
+        )
+    live = phase5_commands.add_parser(
+        "live-dry-run", help="validate a frozen Phase 5 canary or development pilot"
+    )
+    live.add_argument("--experiment", type=Path, required=True)
+    live.add_argument("--authority", type=Path, required=True)
+    run_live = phase5_commands.add_parser(
+        "run-live", help="run an explicitly authorized Phase 5 canary or development pilot"
+    )
+    run_live.add_argument("--experiment", type=Path, required=True)
+    run_live.add_argument("--authority", type=Path, required=True)
+    run_live.add_argument("--allow-live-model", action="store_true")
+    replay_live = phase5_commands.add_parser(
+        "replay-live", help="provider-disabled replay of a completed Phase 5 live stage"
+    )
+    replay_live.add_argument("--experiment", type=Path, required=True)
     return parser
 
 
@@ -245,6 +284,20 @@ def _dispatch(arguments: argparse.Namespace, repository_root: Path) -> int:
         )
         return 0 if evaluated.result.exact else 1
     if arguments.command == "benchmark":
+        if is_phase5_experiment(arguments.experiment):
+            phase5_experiment = load_phase5_experiment(arguments.experiment)
+            if arguments.dry_run:
+                benchmark_outcome = phase5_dry_run(
+                    repository_root=repository_root, experiment=phase5_experiment
+                )
+            else:
+                benchmark_outcome = run_phase5_smoke(
+                    repository_root=repository_root,
+                    registry_path=arguments.experiment,
+                    allow_live_model=arguments.allow_live_model,
+                )
+            print(canonical_json(benchmark_outcome))
+            return 0
         if is_phase4_registry(arguments.experiment):
             phase4_registry = load_phase4_experiment_registry(arguments.experiment)
             if arguments.dry_run:
@@ -442,6 +495,42 @@ def _dispatch(arguments: argparse.Namespace, repository_root: Path) -> int:
                 print(canonical_json(result))
             return 0
         raise AssertionError("unhandled ledger command")
+    if arguments.command == "phase5":
+        if arguments.phase5_command == "dry-run":
+            experiment = load_phase5_experiment(arguments.experiment)
+            phase5_outcome = phase5_dry_run(repository_root=repository_root, experiment=experiment)
+        elif arguments.phase5_command == "smoke":
+            phase5_outcome = run_phase5_smoke(
+                repository_root=repository_root,
+                registry_path=arguments.experiment,
+                allow_live_model=False,
+            )
+        elif arguments.phase5_command == "replay":
+            phase5_outcome = replay_phase5_smoke(
+                repository_root=repository_root, registry_path=arguments.experiment
+            )
+        elif arguments.phase5_command == "live-dry-run":
+            phase5_outcome = phase5_live_dry_run(
+                repository_root=repository_root,
+                registry_path=arguments.experiment,
+                authority_path=arguments.authority,
+            )
+        elif arguments.phase5_command == "run-live":
+            phase5_outcome = run_phase5_live_experiment(
+                repository_root=repository_root,
+                registry_path=arguments.experiment,
+                authority_path=arguments.authority,
+                allow_live_model=arguments.allow_live_model,
+            )
+        elif arguments.phase5_command == "replay-live":
+            phase5_outcome = replay_phase5_live_experiment(
+                repository_root=repository_root,
+                registry_path=arguments.experiment,
+            )
+        else:
+            raise AssertionError("unhandled Phase 5 command")
+        print(canonical_json(phase5_outcome))
+        return 0
     raise AssertionError(f"unhandled command: {arguments.command}")
 
 

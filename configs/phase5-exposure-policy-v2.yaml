@@ -1,0 +1,16 @@
+policy_version: phase5-published-exposure-partition-v2
+status: frozen-pending-user-review
+currency_unit: nano-USD
+parent_cash_policy: configs/project-dual-budget-policy-v2.yaml
+parent_cash_policy_hash: 85af1c470e1a413ff9e1b898e8e1b8b1891644c5584d636d092d77e392e35162
+published_exposure_ceilings_nano_usd:
+  one_request: 10000000
+  child: 150000000
+  training_canary_stage: 10000000
+  development_stage: 5000000000
+  sealed_test_stage: 9990000000
+  phase5_total: 15000000000
+boundary:
+  personal_actual_cash_ceiling_nano_usd: 100000000000
+  enforcement: reconciled-cash-plus-worst-case-unreconciled-published-and-reservations-v1
+  reconciliation_changes_design_inside_frozen_experiment: false
