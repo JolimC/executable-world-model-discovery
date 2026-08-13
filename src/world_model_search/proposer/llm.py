@@ -12,7 +12,12 @@ from world_model_search.domain.types import (
     ProposalRole,
 )
 from world_model_search.dsl.ast import AstLimits, BitExpr
+from world_model_search.memory.experience import ExperienceRetrievalRecord
 from world_model_search.model.cache import ExactResponseCache
+from world_model_search.model.phase5_experience_prompts import (
+    EXPERIENCE_SEARCH_PROMPT_VERSION,
+    inject_experience_memory,
+)
 from world_model_search.model.prompts import ParentScoreFeedback, render_prompt
 from world_model_search.model.schema import (
     BATCH_SCHEMA_NAME,
@@ -121,6 +126,47 @@ class LLMProposer:
         if self.cache is not None:
             self.cache.put(request, response)
         return response
+
+    def build_experience_request(
+        self,
+        *,
+        task: object,
+        role: ProposalRole,
+        batch_size: int,
+        parent: CandidateSummary,
+        feedback: ParentScoreFeedback,
+        retrieval: ExperienceRetrievalRecord,
+    ) -> ModelRequest:
+        """Build a v2 iterative request bound to one selected archive cell and snapshot."""
+
+        from world_model_search.domain.types import PublicTask
+
+        if not isinstance(task, PublicTask):
+            raise TypeError("LLM proposer accepts only PublicTask")
+        _template, _version, base = render_prompt(
+            task=task,
+            role=role,
+            requested_batch_size=batch_size,
+            parent=parent,
+            feedback=feedback,
+        )
+        rendered = inject_experience_memory(base_prompt=base, retrieval=retrieval)
+        return ModelRequest(
+            backend_id=self.backend.backend_id,
+            provider_id=self.backend.provider_id,
+            resolved_model=self.resolved_model,
+            endpoint=self.endpoint,
+            service_tier=self.service_tier,
+            prompt_template="iterative-experience-memory",
+            prompt_version=EXPERIENCE_SEARCH_PROMPT_VERSION,
+            rendered_input=rendered,
+            structured_schema_name=BATCH_SCHEMA_NAME,
+            structured_schema_version=BATCH_SCHEMA_VERSION,
+            structured_schema=candidate_batch_json_schema(role=role, batch_size=batch_size),
+            role=role,
+            requested_batch_size=batch_size,
+            settings=self.settings,
+        )
 
     def parse_response(self, request: ModelRequest, response: ModelResponse) -> LLMParsedResponse:
         if response.request_hash != request.request_hash:

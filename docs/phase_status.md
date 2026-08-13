@@ -495,8 +495,9 @@ general model superiority.
 ## Phase 5 — cross-task memory and learned primitives
 
 Status: **engineering complete; deterministic no-cost smoke complete; one primitive promoted on the
-predeclared development gate; live training canary passed and provider-disabled replay verified;
-live-development pilot remains frozen and unauthorized; sealed test untouched; H3 unconfirmed.**
+predeclared no-cost development gate; live training canary passed; live C/D development pilot completed
+and replayed but did not support H3; final memory/primitive/analysis freeze complete without refitting;
+sealed test remains unauthorized and untouched; H3 unconfirmed.**
 
 The Phase 5 prerequisite is `configs/phase5-transfer-split-v1.yaml`: six structural reference-grammar
 families wholly partitioned into two training, two development, and two sealed-test families. Its twelve
@@ -518,13 +519,11 @@ sealed-test accesses. The final smoke report hash is
 `520d937e70d4220bb161e5df98486c3a5c793ddbdd26aaa7b90d2df08696463e`;
 the summary hash is `31d9f724227475fd244bc291248407fc93a615daaa68f9a71e2acca702f53c9e`.
 
-The ledger now records $6.52762830 cumulative published-rate usage: the carried $6.52680755 plus
-$0.00082075 for the canary. The sole provider-dashboard checkpoint remains $4.65 reconciled actual cash,
-marked user-reported/unverified; the canary amount is unreconciled until a later dashboard checkpoint.
-Uncertainty and active reservations are both $0, and authorizable cash headroom is $95.34917925.
-`phase5-published-exposure-partition-v2` reserves a separate `$0.01` training-canary stage inside the
-unchanged `$15` Phase 5 total. The frozen development pilot has four development tasks, two seeds,
-matched C/D ordering, sixteen requests per child, sixteen children, and a `$1.816576` maximum.
+The user-reported/unverified `$4.65` dashboard checkpoint at 2026-08-12 01:10 CDT reconciled the canary
+through reservation sequence 1. The subsequently authorized development pilot completed all 256 frozen
+requests across sixteen matched children. It recorded 255 valid candidates, one invalid candidate, 255
+oracle calls, `$0.13670200` published-rate usage, zero uncertainty, zero active reservations, and zero
+sealed-test accesses. Current cash upper bound is `$4.78670200`, leaving `$95.21329800` authorizable.
 
 The authorized canary made exactly one physical provider call and returned one schema-valid candidate
 with zero invalid candidates and zero sealed-test accesses. It used 1,587 input and 212 output tokens,
@@ -533,23 +532,56 @@ including 64 reasoning tokens, on the requested model and default service tier. 
 identities with zero provider calls; its summary hash is
 `bab716de3f2c744ed7073a11731dc402881e6c8fdd9c6c0fe36d516d0a03f58c`.
 
-Both provider-disabled preflights pass, with maximum constructed request-identity bounds of 8,580 bytes
+Both provider-disabled preflights passed, with maximum constructed request-identity bounds of 8,580 bytes
 for the canary and 8,583 for development under the conservative 12,000-token bound. The exact deprecated
 `gpt-5-mini-2025-08-07` snapshot, Responses endpoint, default tier, low reasoning, 2,048 output cap,
-frozen memory snapshot, primitive registry, schemas, and analysis plan are hash-bound. The development
-authority still denies every capability, and no development artifact exists. The sealed test remains
-unauthorized and untouched.
+frozen memory snapshot, primitive registry, schemas, and analysis plan were hash-bound.
+
+Neither C nor D solved any child exactly. Mean best score was 5.5 for C and 5.0 for D; the paired D-C
+estimate was -0.5 with family-stratified task-cluster 95% interval [-2, 1]. D helped one task and hurt
+three, each consistently across both seeds. Retrieval precision was 1.0, but the primary correctness
+gate failed and no positive net two-part transfer gain is estimable. Provider-disabled replay verified
+all 256 request chains.
+
+The final freeze retained memory content and primitive definitions unchanged, preventing development-
+outcome refitting. Manifest `5cd248d6bb49ae5b83af33688c9f65d30583e0a5bb4b0e887b35c80f1fed706c`
+binds memory `9ab7e6ced0cdaa7a2764edd9638b1e5d2af781d511343ecf05a420408fd7bad4`, registry
+`14b2610ceac37482f6daead896f89f4d634adf03166a54edf857ec08d299bbd8`, and plan
+`3c0d05942746ed4ccdb63f2410e1d1eb4ea880c4714a1a7891356caed18e404a`. The sealed declaration binds
+these hashes while denying model and test-oracle access.
 
 Gate disposition:
 
 | Gate | Disposition |
 |---|---|
-| Preservation/backward compatibility | Pass: all 130 Phase 0-5 tests pass; frozen Phase 0-4 contracts remain readable |
+| Preservation/backward compatibility | Pass: all 139 Phase 0-5 tests pass; frozen Phase 0-4 contracts remain readable |
 | Family protocol/leakage | Pass for training/development smoke; sealed test access remains zero |
 | Typed-memory integrity | Pass: schema/content/provenance/scope/bounds/counterevidence/corruption tests |
 | Primitive promotion/MDL | Pass on predeclared development gate: +46 net bits, exact correctness |
 | Matched isolation | Pass for deterministic smoke; only declared memory/retrieval/registry fields differ |
 | Scope/contradiction | Pass in executable positive, counterevidence, scoped/rejected, zero/negative tests |
-| Replay/report | Pass: provider-disabled replay reproduces the +142 smoke aggregate and verifies the live canary bundle |
-| Budget authority | Pass: canary used one authorized call; development and sealed test remain unauthorized |
-| Scientific status | Pass: F0 development gate and smoke labels only; H3 unconfirmed |
+| Replay/report | Pass: provider-disabled replay verifies smoke, canary, and all 256 development chains |
+| Budget authority | Pass: authorized canary/development finalized within caps; sealed test remains unauthorized |
+| Scientific status | Development does not support H3: zero exact solves and negative mean D-C score effect; H3 unconfirmed |
+
+### Phase 5 v2 retrospective preparation
+
+Following the negative v1 development result, the revised experience-memory training preparation is
+complete offline. It reuses the frozen Phase 4 condition-C corpus rather than rerunning training search:
+20 runs over ten tasks from one generator family. Nine first-exact requests yielded nine successful
+lineages and 27 same-request/same-parent non-exact sibling lineages. The source is explicitly labeled
+retrospective single-source-family training, including the fact that its tasks originally had the Phase
+4 `development` split. No canonical/reference AST was used.
+
+Evidence is assigned to the representation family of the selected parent cell that produced the first
+exact revision. Three one-family induction requests are prepared for `mixed`, `position-specific`, and
+`threshold`; one-task `conditional` evidence is retained but ineligible. Corpus hash is
+`cca04ce74820fdfda46b33eaeafd1cbecdec006163b3e65d76192536459758b8`. The requests are unexecuted and
+deny provider dispatch.
+
+Prospective validation is implemented as sole-lesson screening against a shared control followed by a
+fresh-task promoted-bundle confirmation. Insufficient family-specific retrieval exposure is reported as
+inconclusive. Only a passing bundle can freeze the development snapshot. Fresh validation/development
+registries, adaptive exposure caps, a cost forecast, and explicit authorization remain required. A tiny
+engineering canary is recommended before development, but a scientific pilot smaller than eight
+matched task-seed pairs is not recommended. The sealed test remains untouched.

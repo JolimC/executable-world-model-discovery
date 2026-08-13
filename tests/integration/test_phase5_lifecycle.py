@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from world_model_search.dsl.primitives import load_primitive_registry
 from world_model_search.errors import ConfigurationError, ReplayError
 from world_model_search.evaluation.phase5_experiment import (
     load_phase5_experiment,
@@ -15,6 +16,7 @@ from world_model_search.evaluation.phase5_experiment import (
     run_phase5_smoke,
 )
 from world_model_search.evaluation.phase5_transfer import load_transfer_registry
+from world_model_search.memory.types import load_memory_snapshot
 from world_model_search.serialization import sha256_json
 
 
@@ -120,7 +122,7 @@ def test_phase5_live_dispatch_and_sealed_test_remain_unauthorized(tmp_path: Path
         )
 
 
-def test_phase5_pending_live_and_sealed_declarations_bind_hashes_and_deny_authority() -> None:
+def test_phase5_live_and_sealed_declarations_bind_hashes_and_preserve_test_denial() -> None:
     transfer = load_transfer_registry(Path("configs/phase5-transfer-split-v1.yaml"))
     exposure = yaml.safe_load(Path("configs/phase5-exposure-policy-v2.yaml").read_text())
     assert isinstance(exposure, dict)
@@ -130,11 +132,22 @@ def test_phase5_pending_live_and_sealed_declarations_bind_hashes_and_deny_author
     sealed = yaml.safe_load(Path("experiments/phase5-test.sealed.yaml").read_text())
     assert isinstance(canary, dict) and isinstance(development, dict) and isinstance(sealed, dict)
     assert canary["exposure_policy_hash"] == exposure_hash
-    assert not any(canary["authorization"].values())
+    assert canary["status"] == "authorized"
+    assert all(canary["authorization"].values())
     assert development["exposure_policy_hash"] == exposure_hash
-    assert not any(development["authorization"].values())
+    assert development["status"] == "authorized"
+    assert all(development["authorization"].values())
     assert sealed["transfer_registry_hash"] == transfer.content_hash
     assert sealed["exposure_policy_hash"] == exposure_hash
+    assert sealed["status"] == "sealed-not-authorized"
+    plan = yaml.safe_load(Path("experiments/phase5-final-freeze/analysis-plan.json").read_text())
+    memory = load_memory_snapshot(Path("experiments/phase5-final-freeze/memory-snapshot.json"))
+    primitives = load_primitive_registry(
+        Path("experiments/phase5-final-freeze/primitive-registry.json")
+    )
+    assert sealed["analysis_plan_hash"] == sha256_json(plan)
+    assert sealed["memory_snapshot_hash"] == memory.snapshot_hash
+    assert sealed["primitive_registry_hash"] == primitives.registry_hash
     assert sealed["authorization"] == {
         "model_calls": False,
         "test_oracle": False,

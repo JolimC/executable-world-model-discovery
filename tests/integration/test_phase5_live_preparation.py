@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from world_model_search.errors import ConfigurationError, ReplayError
+from world_model_search.evaluation.phase5_finalize import finalize_phase5_development
 from world_model_search.evaluation.phase5_live import (
     load_phase5_live_experiment,
     phase5_live_dry_run,
@@ -81,6 +82,19 @@ def _repository(tmp_path: Path) -> Path:
         destination = repository / source
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
+    for name in ("phase5-canary.pending.yaml", "phase5-development.pending.yaml"):
+        authority_path = repository / "experiments" / name
+        authority = yaml.safe_load(authority_path.read_text(encoding="utf-8"))
+        assert isinstance(authority, dict)
+        authority["status"] = "pending-user-review-and-authorization"
+        authority["authorization"] = {
+            "model_calls": False,
+            "oracle_access": False,
+            "user_reviewed_exposure_policy": False,
+            "user_authorized_live_run": False,
+        }
+        authority["authorization_evidence"] = None
+        authority_path.write_text(yaml.safe_dump(authority, sort_keys=False), encoding="utf-8")
     (repository / "local_state").mkdir()
     return repository
 
@@ -245,6 +259,19 @@ def test_fake_matched_development_pilot_writes_nonconfirmatory_analysis(tmp_path
         repository_root=repository, registry_path=development_path
     )
     assert replay["status"] == "verified-provider-disabled"
+    freeze = finalize_phase5_development(
+        repository_root=repository,
+        registry_path=development_path,
+        freeze_root=Path("experiments/phase5-final-freeze"),
+    )
+    assert freeze["status"] == "frozen-provider-disabled"
+    assert freeze["development_refit_performed"] is False
+    assert freeze["sealed_test_accesses"] == 0
+    final_analysis = yaml.safe_load(
+        (repository / "artifacts/phase5/live-development-v1/analysis-final.json").read_text()
+    )
+    assert final_analysis["primary_endpoint_status"].startswith("failed-correctness")
+    assert final_analysis["h3_development_supported"] is False
 
 
 def test_live_freeze_rejects_policy_or_artifact_drift(tmp_path: Path) -> None:

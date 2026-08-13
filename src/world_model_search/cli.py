@@ -27,6 +27,7 @@ from world_model_search.evaluation.phase4_experiment import (
     phase4_dry_run,
     run_phase4_experiment,
 )
+from world_model_search.evaluation.phase5_experience import prepare_phase5_experience_induction
 from world_model_search.evaluation.phase5_experiment import (
     is_phase5_experiment,
     load_phase5_experiment,
@@ -34,6 +35,7 @@ from world_model_search.evaluation.phase5_experiment import (
     replay_phase5_smoke,
     run_phase5_smoke,
 )
+from world_model_search.evaluation.phase5_finalize import finalize_phase5_development
 from world_model_search.evaluation.phase5_live import (
     phase5_live_dry_run,
     replay_phase5_live_experiment,
@@ -199,6 +201,23 @@ def _parser() -> argparse.ArgumentParser:
         "replay-live", help="provider-disabled replay of a completed Phase 5 live stage"
     )
     replay_live.add_argument("--experiment", type=Path, required=True)
+    finalize = phase5_commands.add_parser(
+        "finalize-development", help="analyze and freeze a completed Phase 5 development pilot"
+    )
+    finalize.add_argument("--experiment", type=Path, required=True)
+    finalize.add_argument(
+        "--freeze-root", type=Path, default=Path("experiments/phase5-final-freeze")
+    )
+    prepare_experience = phase5_commands.add_parser(
+        "prepare-experience",
+        help="prepare provider-disabled Phase 4-C lineage contrasts and induction requests",
+    )
+    prepare_experience.add_argument(
+        "--output-root",
+        type=Path,
+        default=Path("artifacts/phase5-experience-v2/retrospective-training"),
+    )
+    prepare_experience.add_argument("--lessons-per-family", type=int, default=1)
     return parser
 
 
@@ -526,6 +545,20 @@ def _dispatch(arguments: argparse.Namespace, repository_root: Path) -> int:
             phase5_outcome = replay_phase5_live_experiment(
                 repository_root=repository_root,
                 registry_path=arguments.experiment,
+            )
+        elif arguments.phase5_command == "finalize-development":
+            if arguments.freeze_root.is_absolute() or ".." in arguments.freeze_root.parts:
+                raise ConfigurationError("--freeze-root must be repository-relative without '..'")
+            phase5_outcome = finalize_phase5_development(
+                repository_root=repository_root,
+                registry_path=arguments.experiment,
+                freeze_root=arguments.freeze_root,
+            )
+        elif arguments.phase5_command == "prepare-experience":
+            phase5_outcome = prepare_phase5_experience_induction(
+                repository_root=repository_root,
+                output_root=arguments.output_root,
+                requested_lessons_per_family=arguments.lessons_per_family,
             )
         else:
             raise AssertionError("unhandled Phase 5 command")

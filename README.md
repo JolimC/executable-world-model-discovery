@@ -35,14 +35,23 @@ language, a predeclared structural-family F0 transfer benchmark, strict C/D prom
 isolation, provider-disabled replay, and a transfer-matrix report. One primitive passed the no-cost
 development promotion gate (+46 net bits after charging its 50-bit definition once). The paired
 two-seed recoding smoke is machinery evidence only because it reuses those development families; it is
-not an H3 test. No live Phase 5 call or sealed-test access occurred, and H3 remains unconfirmed. Phase 6
-interestingness, active queries, hidden state, and self-modifying search remain absent.
+not an H3 test. The subsequent live canary passed compatibility, and the complete 256-request C/D
+development pilot replayed cleanly but found zero exact solutions in either arm. Condition D's mean
+best score was 5.0 versus C's 5.5, so development does not support H3. The final memory, primitive
+registry, and analysis plan are frozen without refitting. No sealed-test access occurred; H3 remains
+unconfirmed. Phase 6 interestingness, active queries, hidden state, and self-modifying search remain
+absent.
 
-The next-stage Phase 5 training canary and matched C/D development pilot are now implemented and
-content-frozen, but their separate authority files still deny model and oracle access. Provider-disabled
-preflights reserve at most one canary request (`$0.007096`) and 256 development requests (`$1.816576`).
-The development runner additionally refuses to start until it can verify a recorded successful Phase 5
-canary. Preparing these files made no provider call and is not authorization to run either stage.
+The canary and development authorities record the user's completed-run authorization. The separate
+sealed-test declaration binds the final freeze hashes while still denying model and test-oracle access.
+Freezing that declaration is not authorization to run the sealed test.
+
+A separate Phase 5 v2 preparation now makes memory experience-derived. It reuses frozen Phase 4
+condition-C search as explicitly retrospective single-source-family training, pairs each first-exact
+lineage with its three same-request/same-parent failures, and prepares one unexecuted induction request
+for each adequately supported parent-cell representation family. Prospective sole-lesson and bundle
+validation remain fail-closed pending fresh tasks, a cost forecast, and explicit authorization; the v1
+pilot is unchanged. See `docs/phase5_experience_memory_v2.md`.
 
 ## Quick start
 
@@ -81,6 +90,9 @@ uv run --locked wms phase5 dry-run
 uv run --locked wms phase5 smoke
 uv run --locked wms phase5 replay
 
+# Provider-disabled Phase 4-C retrospective experience preparation:
+uv run --locked wms phase5 prepare-experience
+
 # Provider-disabled validation of the frozen next-stage designs:
 uv run --locked wms phase5 live-dry-run \
   --experiment experiments/phase5-canary.yaml \
@@ -88,6 +100,10 @@ uv run --locked wms phase5 live-dry-run \
 uv run --locked wms phase5 live-dry-run \
   --experiment experiments/phase5-development.yaml \
   --authority experiments/phase5-development.pending.yaml
+uv run --locked wms phase5 replay-live \
+  --experiment experiments/phase5-development.yaml
+uv run --locked wms phase5 finalize-development \
+  --experiment experiments/phase5-development.yaml
 
 # The Phase 0 mock lifecycle remains available:
 uv run wms solve --config configs/smoke.yaml --proposer mock --run-id smoke

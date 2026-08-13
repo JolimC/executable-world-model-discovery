@@ -634,3 +634,61 @@ recorded memory/retrieval block and frozen learned-primitive registry. Developme
 until a successful canary summary bound to the exact canary registry exists. Because these families were
 already used for primitive promotion, the pilot can validate model behavior, costs, and matched search
 effects but cannot independently confirm H3. The later sealed test remains the only confirmatory path.
+
+## DD-038 — Phase 5 live development outcome and no-refit final freeze
+
+At 2026-08-12 01:10 CDT, the user supplied a second all-time OpenAI project dashboard observation of
+`$4.65`, labeled “amount billed after credits.” It is retained as user-reported/unverified and covers
+finalized reservation sequence 1, including the canary. It does not rewrite published-rate scientific
+accounting.
+
+The user then authorized the exact frozen development registry. All 256 requests completed across the
+16 matched C/D children. There were 255 schema-valid candidates, one invalid candidate, 255 oracle
+calls, no cache hits, and zero sealed-test accesses. Provider-disabled replay verified every recorded
+request, response, result, child, aggregate, and analysis identity.
+
+Neither condition solved any child exactly. Condition C's mean best score was 5.5 and condition D's was
+5.0, a paired D-C estimate of -0.5 with a family-stratified task-cluster 95% interval of [-2, 1]. The
+live development correctness gate therefore failed before code-length optimization, and no positive
+two-part transfer gain is estimable. Retrieval precision was 1.0, but successful retrieval did not
+translate into exact solving or improved mean search quality. This is a null/negative development
+result: H3 remains unconfirmed and is not supported by this pilot.
+
+The final freeze performs no development-outcome refit. It retains the proposer-safe memory content and
+the primitive definition set exactly, while rebinding the registry metadata to the final content-
+addressed analysis plan. This avoids deleting an unfavorable primitive, selecting only the one task it
+helped, or otherwise tuning on the pilot. The sealed-test declaration binds the final memory, registry,
+and plan hashes but continues to deny both model and test-oracle authority. Freezing preserves an audit
+trail and an optional confirmatory path; it is not authorization or a recommendation to spend more.
+
+## DD-039 — Experience-derived and archive-family-scoped memory v2
+
+The completed v1 memory remains immutable, but its hand-specified selector is not considered learned
+from search experience. V2 reuses the frozen Phase 4 condition-C search instead of buying another
+training search. Its 20 runs over 10 tasks are explicitly redesignated as retrospective, single-source-
+family v2 training; their original Phase 4 `development` label and the resulting limitation remain in
+evaluator provenance. The extractor uses the first exact-producing request in each of nine solving runs
+and pairs its successful lineage with all three non-exact siblings from the same request and selected
+parent. Canonical/reference ASTs never enter extraction or induction.
+
+“Family-scoped” means the archive coordinate's public representation-family dimension, not the hidden
+benchmark generator family. Evidence is assigned to the selected parent cell at the consequential
+revision, never the exact child's terminal syntax. This yields eligible groups for `mixed` (three
+tasks), `position-specific` (three), and `threshold` (two); the one-task `conditional` evidence is
+audited but not induced. Exactly one prepared induction request per eligible family sees successful and
+matched unsuccessful transitions. Generator-family labels remain evaluator-only.
+
+Promotion has two prospective stages within the declared `elementary-radius1-binary` generator family.
+Stage 1 reuses an exact matched memoryless control across sole-lesson treatment arms, so effects remain
+attributable. A lesson needs actual scoped retrieval on at least four distinct tasks, positive mean
+normalized-exact-AUC gain, and no exact regression. Stage 2 tests the promoted bundle on tasks fresh
+from Stage 1 and requires at least four exposed tasks, at least two task exposures per included lesson,
+positive mean gain, and no exact regression. Inadequate exposure is `inconclusive`, not rejection.
+Only the passing bundle freezes a snapshot, which binds its validation-pair hashes.
+
+The retrospective corpus and three induction request packages were prepared offline with zero provider
+requests. Each package denies provider dispatch. Fresh semantically disjoint validation/development
+tasks, adaptive exposure caps, and cost ceilings still require freezing and explicit authorization.
+No cross-generator-family claim is available from this pilot. Retrieval remains exact-family-only with
+no fallback and deterministic item/byte/token bounds. The sealed v1 test remains untouched and
+unauthorized.

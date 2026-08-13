@@ -4,9 +4,9 @@ status: sealed-not-authorized
 data_role: confirmatory-test
 transfer_registry: configs/phase5-transfer-split-v1.yaml
 transfer_registry_hash: 9c34f0675ead5d9f534a0f325504fd40360abb2ccf35bcd20bebdfb38d6741ce
-analysis_plan_hash: pending-development-freeze
-memory_snapshot_hash: pending-development-freeze
-primitive_registry_hash: pending-development-freeze
+analysis_plan_hash: 3c0d05942746ed4ccdb63f2410e1d1eb4ea880c4714a1a7891356caed18e404a
+memory_snapshot_hash: 9ab7e6ced0cdaa7a2764edd9638b1e5d2af781d511343ecf05a420408fd7bad4
+primitive_registry_hash: 14b2610ceac37482f6daead896f89f4d634adf03166a54edf857ec08d299bbd8
 exposure_policy: configs/phase5-exposure-policy-v2.yaml
 exposure_policy_hash: 9b264074674f64372d003eb58029c0d38d6a363e356f672ff009aba658451716
 authorization:

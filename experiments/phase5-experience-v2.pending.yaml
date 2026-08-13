@@ -1,0 +1,118 @@
+protocol_version: phase5-experience-derived-memory-v2
+status: design-frozen-pending-induction-validation-registry-cost-review-and-authorization
+supersedes_mechanism_only: phase5-hand-specified-canonical-reference-memory-v1
+preserves_completed_artifacts: true
+scientific_scope: f0-structured-transfer-development
+experience_source:
+  designation: retrospective-single-source-family-training
+  source_experiment: phase4-primary-pilot-v2
+  source_condition: uniform-diverse-archive-v1
+  source_generator_family: elementary-radius1-binary
+  original_task_split: development
+  phase5_memory_role: training
+  source_registry_hash: 4c05276973bb3b2c97e0c17387649ae27fb015a598ed75c3866f23770c965804
+  corpus_artifact: artifacts/phase5-experience-v2/retrospective-training/retrospective-corpus.json
+  corpus_hash: cca04ce74820fdfda46b33eaeafd1cbecdec006163b3e65d76192536459758b8
+  search: reused-phase4-llm-map-elites-condition-c-no-new-training-search
+  successful_lineage: first-exact-child-per-solving-run-with-complete-parent-dag-v1
+  matched_unsuccessful_lineages: all-nonexact-siblings-same-request-same-selected-parent-v1
+  consequential_revision: request-that-produced-first-exact-child-v1
+  representation_family_assignment: selected-parent-cell-not-successful-child-v1
+  canonical_reference_ast_available_to_lesson_induction: false
+  source_condition_runs: 20
+  source_tasks: 10
+  exact_solving_runs: 9
+  exact_solving_tasks: 5
+  contrast_records: 9
+  matched_unsuccessful_lineages_count: 27
+  minimum_training_tasks: 2
+  minimum_training_generator_families: 1
+  single_source_family_limitation_declared: true
+lesson_induction:
+  lesson_inducer: llm-strict-structured-output-from-sanitized-matched-contrasts-v1
+  request_partition: exactly-one-request-per-eligible-representation-family
+  requested_lessons_per_family: 1
+  prepared_request_count: 3
+  prepared_families: [mixed, position-specific, threshold]
+  excluded_families:
+    conditional: fewer-than-two-independent-source-tasks
+  prepared_manifest: artifacts/phase5-experience-v2/retrospective-training/manifest.json
+  prepared_manifest_hash: dfe033327ce82ee31ad389aba7f3b2675d3e4c197f23f86f1814c8ecc44c187d
+  maximum_published_rate_nano_usd: 21299000
+  maximum_published_rate_usd: 0.021299
+  provider_requests_executed: 0
+evidence_scopes:
+  retrieval_key: public-archive-coordinate-representation-family-v1
+  hidden_generator_family_use: evaluator-independence-check-only
+  hidden_generator_family_in_prompt: false
+  global_fallback_lessons: false
+retrieval:
+  trigger: after-uniform-archive-cell-selection-before-iterative-request
+  max_items: 4
+  max_bytes: 4096
+  max_tokens_conservative: 4096
+  rerun_on_every_selected-cell: true
+  stable_order: validation-gain-descending-then-lesson-id
+promotion_validation:
+  generator_family_scope: elementary-radius1-binary-within-family-mechanism-validation
+  generator_family_count_required: 1
+  tasks: prospective-and-disjoint-from-phase4-training-development-pilot-and-sealed-test
+  search: matched-llm-map-elites-memory-off-vs-memory-on
+  shared_control_reuse: exact-same-task-seed-memoryless-run
+  insufficient_exposure_status: inconclusive-not-rejected
+  stage_1_individual_lesson_screen:
+    treatment_arms: exactly-one-lesson-per-arm
+    control_arm: shared-empty-memory
+    minimum_distinct_tasks_with_scoped-memory_exposure_per_lesson: 4
+    exact_regression_allowed: false
+    require_positive_mean_normalized_exact_auc: true
+  stage_2_promoted_bundle_confirmation:
+    tasks_fresh_from_stage_1: true
+    treatment_arm: all-stage-1-promoted-lessons-with-cell-conditioned-retrieval
+    control_arm: shared-empty-memory
+    minimum_distinct_tasks_with-any-memory-exposure: 4
+    minimum_distinct_tasks_with-exposure_per-promoted-lesson: 2
+    exact_regression_allowed: false
+    require_positive_mean_normalized_exact_auc: true
+  adaptive_exposure_blocks:
+    allowed: true
+    rule: add-predeclared-fresh-task-blocks-only-until-exposure-minima-or-frozen-cap
+    task_cap_and_cost_ceiling_frozen_before_first_call: required
+development_pilot:
+  task_role: fresh-live-development-not-promotion-validation-not-sealed
+  mechanism_arms:
+    - empty-experience-memory
+    - cell-conditioned-experience-memory
+  primary_endpoint: paired-normalized-exact-solve-auc
+  secondary_endpoints:
+    - exact-solve-rate
+    - calls-to-first-exact
+    - best-two-part-bits
+    - retrieval-precision
+    - negative-transfer-by-archive-representation-family
+    - model-token-usage
+    - published-rate-equivalent-cost
+  no_refit_inside_frozen_pilot: true
+  engineering_canary_before_pilot: required
+  smaller_scientific_pilot_recommended: false
+  recommended_minimum_matched_task_seed_pairs: 8
+  rationale: family-scoped-retrieval-is-sparse-and-the-prior-eight-pair-pilot-had-zero-exact-solves
+model_contract:
+  backend: openai-responses-sdk-v1
+  provider: openai
+  model: gpt-5-mini-2025-08-07
+  endpoint: v1/responses
+  service_tier: default
+  reasoning_effort: low
+  max_output_tokens: 2048
+  structured_outputs: strict-json-schema
+authorization:
+  new_task_registry_frozen: false
+  exposure_policy_reviewed: false
+  training_search_model_calls: false
+  lesson_induction_model_calls: false
+  promotion_validation_model_calls: false
+  development_pilot_model_calls: false
+  sealed_test_model_calls: false
+  sealed_test_oracle: false
+fail_closed: true
