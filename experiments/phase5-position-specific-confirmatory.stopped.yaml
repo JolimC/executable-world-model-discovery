@@ -1,0 +1,73 @@
+protocol_version: phase5-position-specific-confirmatory-v1
+status: failed-stopped-before-canary
+recorded_at: 2026-08-13T05:25:42-05:00
+stop_reason: prospective-confirmatory-rule-failed
+sealed_test_untouched: true
+
+dashboard_checkpoint:
+  billed_nano_usd: 7680000000
+  observed_at: 2026-08-13T04:17:00-05:00
+  scope: OpenAI project “world_model_search,” all time, dashboard label “amount billed after credits”
+  source: user-reported-provider-dashboard
+  verification: user-reported-unverified
+  checkpoint_id: 434b208d97c9b3b5ad1f7b10773a1cbbc4e1659ce9e57972f113b912baac712a
+
+prospective_freeze:
+  candidate_family: position-specific
+  candidate_proposal_id: 4cc2791aef19703ebe11685ed9deb132bfca69ea131761da24a58c2c05c2f852
+  task_binding: artifacts/phase5-experience-v2/position-confirmatory-v1/task-binding.json
+  task_binding_hash: 4d4cfcdb01f4f0cbe88951455046b00f93d54c4c3354a9ce4d8ffbe44bddaf38
+  analysis_plan: artifacts/phase5-experience-v2/position-confirmatory-v1/analysis-plan.json
+  analysis_plan_hash: b9a5791e5eedd324a2e9cc7d80c76b76552cbf80343b587642d5f0427a7dec7c
+  matched_task_seed_pairs: 8
+  search_seed: 62001
+  batch_size: 4
+  logical_model_requests_per_child: 63
+  oracle_evaluations_per_child: 256
+  decision_rule:
+    maximum_exact_solve_regressions: 1
+    requires_positive_net_exact_solves: true
+    requires_positive_mean_normalized_exact_auc_gain: true
+    requires_nonnegative_mean_local_accuracy_auc_gain: true
+    minimum_exposure_tasks: 4
+    minimum_matching_request_exposures_total: 8
+
+result:
+  artifact: artifacts/phase5-experience-v2/position-confirmatory-v1/result.json
+  artifact_hash: fffb022d74c41cafa4169ddf9181ab490c09bd7c8836a09efcbe9c2ac11517d9
+  status: failed
+  reasons:
+    - more-than-one-exact-solve-regression
+    - nonpositive-net-exact-solves
+    - nonpositive-mean-exact-auc-gain
+  completed_children: 16
+  exposed_tasks: 8
+  matching_request_exposures: 181
+  baseline_exact_count: 3
+  treatment_exact_count: 2
+  exact_gain_task_count: 1
+  exact_regression_task_count: 2
+  net_exact_solve_gain: -1
+  mean_exact_auc_gain_ppm: -77637
+  mean_local_accuracy_auc_gain_ppm: 11413
+
+spending_nano_usd:
+  confirmatory_reconciled: 2020202750
+  confirmatory_uncertain: 0
+  active_reserved: 0
+  project_cash_upper_bound_after_run: 13796713850
+  project_remaining_authorizable: 86203286150
+  prior_unresolved_uncertain: 6230000
+
+not_executed:
+  - validated-memory-snapshot-freeze
+  - engineering-canary
+  - development-pilot
+  - sealed-test
+
+authorization_used:
+  confirmatory_model_calls: true
+  canary_model_calls: false
+  development_pilot_model_calls: false
+  sealed_test_model_calls: false
+  sealed_test_oracle: false

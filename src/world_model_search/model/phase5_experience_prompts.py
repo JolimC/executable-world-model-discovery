@@ -42,7 +42,7 @@ def lesson_induction_json_schema(
                         "source_evidence_ids",
                     ],
                     "properties": {
-                        "lesson_text": {"type": "string", "minLength": 1, "maxLength": 1_200},
+                        "lesson_text": {"type": "string"},
                         "archive_representation_family": {
                             "type": "string",
                             "const": representation_family.value,
@@ -50,8 +50,7 @@ def lesson_induction_json_schema(
                         "source_evidence_ids": {
                             "type": "array",
                             "minItems": 2,
-                            "uniqueItems": True,
-                            "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                            "items": {"type": "string"},
                         },
                     },
                 },
@@ -131,8 +130,11 @@ def parse_lesson_induction_response(
         }:
             raise ValueError("lesson induction item has missing or unknown fields")
         evidence_ids = raw["source_evidence_ids"]
-        if not isinstance(evidence_ids, list) or any(
-            not isinstance(item, str) for item in evidence_ids
+        if (
+            not isinstance(evidence_ids, list)
+            or len(evidence_ids) < 2
+            or len(set(evidence_ids)) != len(evidence_ids)
+            or any(not isinstance(item, str) for item in evidence_ids)
         ):
             raise ValueError("lesson induction evidence IDs are malformed")
         proposal = ExperienceLessonProposal(

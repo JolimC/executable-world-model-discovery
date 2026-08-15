@@ -1,0 +1,68 @@
+protocol_version: phase5-experience-derived-memory-v2
+status: stopped-stage2-inconclusive
+stop_gate: promoted-bundle-confirmation-v1
+stop_reason: no-lessons-passed-screening
+sealed_test_untouched: true
+
+retrospective_training:
+  designation: retrospective-single-source-family-training
+  source_experiment: phase4-primary-pilot-v2
+  source_condition: uniform-diverse-archive-v1
+  source_generator_family: elementary-radius1-binary
+  corpus_hash: cca04ce74820fdfda46b33eaeafd1cbecdec006163b3e65d76192536459758b8
+  prepared_manifest: artifacts/phase5-experience-v2/retrospective-training-v3/manifest.json
+  prepared_manifest_hash: 707a048bad709f7e078d902d49a0fdf9ba3d1c63c3a51f69683e49fb06feaae3
+  frozen_lessons: artifacts/phase5-experience-v2/retrospective-training-v3/induction/frozen-lessons.json
+  frozen_lessons_hash: 15a9e1add6b1f568d8b151f4e217a3c5e0af8c364d839fa19b1fa8c2f37ff617
+  successful_induction_requests: 3
+  frozen_lesson_families: [mixed, position-specific, threshold]
+
+prospective_freeze:
+  task_registry: artifacts/phase5-experience-v2/prospective-v1/task-registry.json
+  task_registry_hash: 6475f2847b31e0b66f33e35a703bc8248d2302c9905e4af2b2810c4444845708
+  analysis_plan: artifacts/phase5-experience-v2/prospective-v1/analysis-plan.json
+  analysis_plan_hash: 3ec662b346612ff22fc64aefcbaa8c26399f5b0eb55ae5159e80052b48c84053
+
+stage_1_individual_lesson_screen:
+  artifact: artifacts/phase5-experience-v2/prospective-v1/stage1-individual-screen.json
+  artifact_hash: d3a057c1146eefd1672aa0a087860b6d0d9da99552aace83d0b364f15a115c42
+  matched_task_seed_pairs_per_lesson: 8
+  shared_control_children: 8
+  sole_lesson_treatment_children: 24
+  scoped_exposure_tasks_per_lesson: 8
+  results:
+    mixed: rejected-nonpositive-mean-normalized-exact-auc-gain
+    position-specific: rejected-nonpositive-mean-normalized-exact-auc-gain
+    threshold: rejected-nonpositive-mean-normalized-exact-auc-gain
+  promoted_lesson_count: 0
+
+stage_2_promoted_bundle_confirmation:
+  artifact: artifacts/phase5-experience-v2/prospective-v1/stage2-bundle-validation.json
+  artifact_hash: 0666700cf311844b1b764c33651fd8ff200f621d1c6f0951647f2fb2c2eede54
+  status: inconclusive
+  reason: no-lessons-passed-screening
+  validation_pairs_run: 0
+  provider_requests_required_after_short_circuit: 0
+
+spending_nano_usd:
+  induction_reconciled: 6437750
+  stage_1_reconciled: 557498400
+  incidental_stage_2_reconciled_before_stop: 7543450
+  incidental_stage_2_uncertain: 6230000
+  active_reserved: 0
+  uncertain_artifact: artifacts/phase5-experience-v2/prospective-v1/interrupted-stage2-dispatch.json
+  uncertain_artifact_hash: 2bc6d85a4e0f308b6c7be5f0a9d69d0c0e5894eff3f8a04663924c5e6e269e99
+
+not_executed:
+  - validated-memory-snapshot-freeze
+  - engineering-canary
+  - development-pilot
+  - sealed-test
+
+authorization_used:
+  lesson_induction_model_calls: true
+  promotion_validation_model_calls: true
+  canary_model_calls: false
+  development_pilot_model_calls: false
+  sealed_test_model_calls: false
+  sealed_test_oracle: false

@@ -15,20 +15,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from world_model_search.domain.types import SplitLabel
+from world_model_search.domain.types import ProposalRole, SplitLabel
 from world_model_search.dsl.json_schema import DslCandidateDocument
 from world_model_search.errors import ConfigurationError, PersistenceError
 from world_model_search.memory.experience import (
+    ExperienceLessonProposal,
     ExperienceLineageStep,
     MatchedUnsuccessfulLineage,
     SuccessfulLineageEvidence,
 )
+from world_model_search.model.backends import LiveOptIn, OpenAIResponsesBackend
+from world_model_search.model.ledger import ProjectLedger
 from world_model_search.model.phase5_experience_prompts import (
     LESSON_INDUCTION_PROMPT_VERSION,
     lesson_induction_json_schema,
+    parse_lesson_induction_response,
     render_lesson_induction_prompt,
 )
-from world_model_search.persistence.artifacts import write_content_artifact
+from world_model_search.model.policy import load_price_policy
+from world_model_search.model.types import ModelDispatchError, ModelRequest, ModelResponse
+from world_model_search.persistence.artifacts import read_text_artifact, write_content_artifact
 from world_model_search.search.archive import (
     ArchiveCoordinate,
     ArchiveLayer,
@@ -60,6 +66,7 @@ INDUCTION_MAX_OUTPUT_TOKENS = 2_048
 UNCACHED_INPUT_NANO_USD_PER_TOKEN = 250
 OUTPUT_NANO_USD_PER_TOKEN = 2_000
 ONE_REQUEST_CEILING_NANO_USD = 10_000_000
+EXPERIENCE_INDUCTION_RESULT_VERSION = "phase5-experience-induction-results-v1"
 
 
 def _read_object(path: Path) -> JsonObject:
@@ -67,6 +74,12 @@ def _read_object(path: Path) -> JsonObject:
         return parse_json_object(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise PersistenceError(f"cannot read frozen Phase 4 source artifact: {path}") from exc
+
+
+def _integer_field(value: object, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigurationError(f"{label} must be an integer")
+    return value
 
 
 def _verify_text_hash(path: Path, expected: str) -> None:
@@ -455,7 +468,28 @@ def prepare_phase5_experience_induction(
             requested_lessons=requested_lessons_per_family,
             representation_family=family,
         )
-        conservative_input_token_bound = len(prompt.encode("utf-8"))
+        request = ModelRequest(
+            backend_id="openai-responses-sdk-v1",
+            provider_id="openai",
+            resolved_model="gpt-5-mini-2025-08-07",
+            endpoint="v1/responses",
+            service_tier="default",
+            prompt_template="family-lineage-contrast-induction",
+            prompt_version=LESSON_INDUCTION_PROMPT_VERSION,
+            rendered_input=prompt,
+            structured_schema_name=f"phase5_{family.value.replace('-', '_')}_lessons_v1",
+            structured_schema_version=1,
+            structured_schema=schema,
+            role=ProposalRole.EXPLOIT,
+            requested_batch_size=requested_lessons_per_family,
+            settings={
+                "reasoning": {"effort": "low"},
+                "max_output_tokens": INDUCTION_MAX_OUTPUT_TOKENS,
+                "store": False,
+                "truncation": "disabled",
+            },
+        )
+        conservative_input_token_bound = request.conservative_input_token_bound
         maximum_nano_usd = (
             conservative_input_token_bound * UNCACHED_INPUT_NANO_USD_PER_TOKEN
             + INDUCTION_MAX_OUTPUT_TOKENS * OUTPUT_NANO_USD_PER_TOKEN
@@ -556,3 +590,189 @@ def prepare_phase5_experience_induction(
             "provider_requests_executed": 0,
         },
     )
+
+
+def execute_phase5_experience_induction(
+    *,
+    repository_root: Path,
+    output_root: Path,
+    price_policy_path: Path,
+    ledger_path: Path,
+    allow_live_model: bool,
+) -> JsonObject:
+    """Execute the three frozen per-family packages with durable ledger accounting."""
+
+    destination = repository_root / output_root
+    manifest = _read_object(destination / "manifest.json")
+    if manifest.get("manifest_version") != PREPARATION_MANIFEST_VERSION:
+        raise ConfigurationError("experience induction manifest version differs")
+    package_rows = manifest.get("prepared_induction_requests")
+    if not isinstance(package_rows, list) or len(package_rows) != 3:
+        raise ConfigurationError("experience induction requires exactly three frozen packages")
+    corpus = extract_phase4_condition_c_corpus(repository_root=repository_root)
+    if manifest.get("source_corpus_hash") != corpus.corpus_hash:
+        raise ConfigurationError("experience induction corpus hash differs")
+    catalog = {item.evidence_id: item for item in corpus.evidence}
+    policy = load_price_policy(repository_root / price_policy_path)
+    backend = OpenAIResponsesBackend(opt_in=LiveOptIn.resolve(allow_live_model))
+    proposals: list[ExperienceLessonProposal] = []
+    response_rows: list[JsonObject] = []
+    with ProjectLedger(repository_root / ledger_path, policy) as ledger:
+        for package_row in package_rows:
+            if not isinstance(package_row, dict):
+                raise ConfigurationError("experience induction package row is malformed")
+            relative = Path(str(package_row.get("request_artifact")))
+            package_text = read_text_artifact(repository_root / relative)
+            if sha256_text(package_text) != package_row.get("request_artifact_hash"):
+                raise ConfigurationError("experience induction package hash differs")
+            package = parse_json_object(package_text)
+            family = RepresentationFamily(str(package.get("archive_representation_family")))
+            structured = package.get("structured_output")
+            model = package.get("model_contract")
+            budget = package.get("budget")
+            if (
+                not isinstance(structured, dict)
+                or not isinstance(model, dict)
+                or not isinstance(budget, dict)
+            ):
+                raise ConfigurationError("experience induction package sections are malformed")
+            schema = structured.get("schema")
+            if not isinstance(schema, dict):
+                raise ConfigurationError("experience induction schema is malformed")
+            request = ModelRequest(
+                backend_id=str(model.get("backend")),
+                provider_id=str(model.get("provider")),
+                resolved_model=str(model.get("model")),
+                endpoint=str(model.get("endpoint")),
+                service_tier=str(model.get("service_tier")),
+                prompt_template="family-lineage-contrast-induction",
+                prompt_version=str(package.get("prompt_version")),
+                rendered_input=str(package.get("rendered_input_utf8")),
+                structured_schema_name=str(structured.get("name")),
+                structured_schema_version=1,
+                structured_schema=schema,
+                role=ProposalRole.EXPLOIT,
+                requested_batch_size=_integer_field(
+                    package.get("requested_lessons"), "requested lessons"
+                ),
+                settings={
+                    "reasoning": {"effort": str(model.get("reasoning_effort"))},
+                    "max_output_tokens": _integer_field(
+                        model.get("max_output_tokens"), "maximum output tokens"
+                    ),
+                    "store": False,
+                    "truncation": "disabled",
+                },
+            )
+            response_path = destination / "induction" / f"{family.value}.response.json"
+            if response_path.is_file():
+                response_artifact = _read_object(response_path)
+                response = ModelResponse.from_deterministic_value(response_artifact.get("response"))
+            else:
+                maximum = _integer_field(
+                    budget.get("maximum_published_rate_nano_usd"), "maximum request cost"
+                )
+                independently_computed = policy.price.maximum_cost(
+                    input_token_bound=request.conservative_input_token_bound,
+                    max_output_tokens=_integer_field(
+                        model.get("max_output_tokens"), "maximum output tokens"
+                    ),
+                )
+                if maximum != independently_computed or maximum > ONE_REQUEST_CEILING_NANO_USD:
+                    raise ConfigurationError("experience induction cost binding differs")
+                reservation_id = sha256_text(
+                    f"phase5-experience-induction-v1\0{family.value}\0{request.request_hash}"
+                )
+                ledger.reserve(
+                    reservation_id=reservation_id,
+                    run_id="phase5-experience-v2-induction",
+                    stage="development",
+                    request_hash=request.request_hash,
+                    amount_nano_usd=maximum,
+                    child_cap_nano_usd=150_000_000,
+                )
+                try:
+                    response = backend.dispatch(request)
+                except ModelDispatchError as exc:
+                    failure: JsonObject = {
+                        "artifact_version": "phase5-experience-induction-failure-v1",
+                        "family": family.value,
+                        "request_hash": request.request_hash,
+                        "error": exc.error.to_value(),
+                    }
+                    write_content_artifact(
+                        destination / "induction" / f"{family.value}.failure.json",
+                        canonical_json(failure),
+                    )
+                    if exc.error.usage_uncertain:
+                        ledger.mark_uncertain(reservation_id=reservation_id, failure_record=failure)
+                    else:
+                        ledger.reconcile(
+                            reservation_id=reservation_id,
+                            actual_nano_usd=0,
+                            usage_record={**failure, "actual_nano_usd": 0},
+                        )
+                    raise
+                response_artifact = {
+                    "artifact_version": "phase5-experience-induction-response-v1",
+                    "family": family.value,
+                    "request_hash": request.request_hash,
+                    "response": response.deterministic_value(),
+                    "diagnostics": {"provider_latency_ns": response.provider_latency_ns},
+                }
+                response_hash = write_content_artifact(
+                    response_path, canonical_json(response_artifact)
+                )
+                actual = policy.price.cost(response.usage)
+                ledger.reconcile(
+                    reservation_id=reservation_id,
+                    actual_nano_usd=actual,
+                    usage_record={
+                        "run_id": "phase5-experience-v2-induction",
+                        "family": family.value,
+                        "request_hash": request.request_hash,
+                        "response_hash": response_hash,
+                        "usage": response.usage.to_value(),
+                        "actual_nano_usd": actual,
+                        "price_policy_hash": policy.content_hash,
+                    },
+                )
+            parsed = parse_lesson_induction_response(
+                response.raw_text,
+                evidence_catalog=catalog,
+                requested_lessons=_integer_field(
+                    package.get("requested_lessons"), "requested lessons"
+                ),
+                representation_family=family,
+            )
+            proposals.extend(parsed)
+            response_rows.append(
+                {
+                    "archive_representation_family": family.value,
+                    "request_hash": request.request_hash,
+                    "response_artifact": str(response_path.relative_to(repository_root)),
+                    "usage": response.usage.to_value(),
+                    "lesson_proposal_ids": [item.proposal_id for item in parsed],
+                }
+            )
+    value: JsonObject = cast(
+        JsonObject,
+        {
+            "result_version": EXPERIENCE_INDUCTION_RESULT_VERSION,
+            "source_corpus_hash": corpus.corpus_hash,
+            "lessons": [
+                item.identity_value() | {"proposal_id": item.proposal_id}
+                for item in proposals
+            ],
+            "responses": response_rows,
+        },
+    )
+    artifact_hash = write_content_artifact(
+        destination / "induction" / "frozen-lessons.json", canonical_json(value)
+    )
+    return {
+        "status": "lesson-induction-complete",
+        "lesson_count": len(proposals),
+        "frozen_lessons_artifact_hash": artifact_hash,
+        "families": [item.archive_representation_family.value for item in proposals],
+    }

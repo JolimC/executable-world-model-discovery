@@ -1,0 +1,92 @@
+protocol_version: phase5-experience-deep-validation-v1
+status: stopped-before-canary-no-validated-snapshot
+recorded_at: 2026-08-13T04:04:36-05:00
+stop_gate: deep-individual-lesson-screen-v1
+stop_reason: no-lessons-passed-deep-screening
+sealed_test_untouched: true
+
+retrospective_training:
+  designation: retrospective-single-source-family-training
+  source_experiment: phase4-primary-pilot-v2
+  source_condition: uniform-diverse-archive-v1
+  source_generator_family: elementary-radius1-binary
+  frozen_lessons: artifacts/phase5-experience-v2/retrospective-training-v3/induction/frozen-lessons.json
+  frozen_lessons_hash: 15a9e1add6b1f568d8b151f4e217a3c5e0af8c364d839fa19b1fa8c2f37ff617
+  frozen_lesson_families: [mixed, position-specific, threshold]
+
+deep_validation_freeze:
+  task_registry: artifacts/phase5-experience-v2/deep-validation-v1/task-registry.json
+  task_registry_hash: 769e82f27552423ebef3b15702878ed4088217256ece13f3179828ef8c6aad28
+  analysis_plan: artifacts/phase5-experience-v2/deep-validation-v1/analysis-plan.json
+  analysis_plan_hash: 3760873263d7a30d60cb8153fff29615165987d0f5429ae8113d3885fe17c4fe
+  matched_task_seed_pairs_per_lesson: 8
+  batch_size: 4
+  logical_model_requests_per_child: 63
+  proposal_items_per_child: 249
+  oracle_evaluations_per_child: 256
+  exposure_gate:
+    minimum_distinct_tasks: 4
+    minimum_matching_requests_total: 8
+    insufficient_status: inconclusive-not-rejected
+    mismatched_family_retrieval_allowed: false
+
+stage_1_individual_lesson_screen:
+  artifact: artifacts/phase5-experience-v2/deep-validation-v1/stage1-individual-screen.json
+  artifact_hash: f6e6ed89cea50adca0eb6e55df5bc3d585a3081dab5a1441d53b074044aff935
+  shared_control_children: 8
+  sole_lesson_treatment_children: 24
+  completed_children: 32
+  results:
+    mixed:
+      status: rejected
+      reason: exact-solve-regression
+      exposed_tasks: 8
+      matching_request_exposures: 153
+      mean_exact_auc_gain_ppm: -28809
+      mean_local_accuracy_auc_gain_ppm: 1037
+    position-specific:
+      status: rejected
+      reason: exact-solve-regression
+      exposed_tasks: 8
+      matching_request_exposures: 184
+      mean_exact_auc_gain_ppm: 216796
+      mean_local_accuracy_auc_gain_ppm: 34240
+    threshold:
+      status: rejected
+      reason: exact-solve-regression
+      exposed_tasks: 8
+      matching_request_exposures: 53
+      mean_exact_auc_gain_ppm: -58594
+      mean_local_accuracy_auc_gain_ppm: -9644
+  promoted_lesson_count: 0
+
+stage_2_promoted_bundle_confirmation:
+  artifact: artifacts/phase5-experience-v2/deep-validation-v1/stage2-bundle-validation.json
+  artifact_hash: 998dc91f7518217bc2e83bdc8ad090a8e23a2f88f06b9d288f6866fa489ec49f
+  status: inconclusive
+  reason: no-lessons-passed-deep-screening
+  validation_pairs_run: 0
+  provider_requests_required_after_short_circuit: 0
+
+spending_nano_usd:
+  deep_stage_1_reconciled: 4090281100
+  deep_stage_1_uncertain: 0
+  deep_active_reserved: 0
+  project_cash_upper_bound_after_run: 9454692700
+  project_remaining_authorizable: 90545307300
+  prior_unresolved_uncertain: 6230000
+
+not_executed:
+  - deep-stage-2-provider-runs
+  - validated-memory-snapshot-freeze
+  - engineering-canary
+  - development-pilot
+  - sealed-test
+
+authorization_used:
+  deep_stage_1_model_calls: true
+  deep_stage_2_model_calls: false
+  canary_model_calls: false
+  development_pilot_model_calls: false
+  sealed_test_model_calls: false
+  sealed_test_oracle: false

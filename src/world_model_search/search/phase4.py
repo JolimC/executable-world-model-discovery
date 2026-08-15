@@ -29,6 +29,10 @@ from world_model_search.dsl.json_schema import (
     ast_canonical_json,
 )
 from world_model_search.errors import BudgetExhaustedError, ConfigurationError, PersistenceError
+from world_model_search.memory.experience import (
+    ExperienceMemorySnapshot,
+    retrieve_experience_for_cell,
+)
 from world_model_search.model.backends import (
     LiveOptIn,
     OfflineResumeBackend,
@@ -64,6 +68,7 @@ from world_model_search.phase4_versions import (
 from world_model_search.proposer.llm import LLMParsedResponse, LLMProposer
 from world_model_search.scheduler.uniform import UniformScheduler
 from world_model_search.search.archive import (
+    ArchiveCoordinate,
     ArchiveDecision,
     MapElitesArchive,
     SingleIncumbent,
@@ -411,6 +416,9 @@ class Phase4RunEngine:
         prepared: PreparedPhase4,
         backend: ModelBackend,
         allow_new_dispatch: bool = True,
+        experience_snapshot: ExperienceMemorySnapshot | None = None,
+        experience_arm_id: str | None = None,
+        experience_retrieval_bounds: tuple[int, int, int] = (4, 4096, 4096),
     ) -> None:
         if (
             config.model is None
@@ -433,6 +441,18 @@ class Phase4RunEngine:
         self.prepared = prepared
         self.backend = backend
         self.allow_new_dispatch = allow_new_dispatch
+        self.experience_snapshot = experience_snapshot
+        self.experience_arm_id = experience_arm_id
+        self.experience_retrieval_bounds = experience_retrieval_bounds
+        if (experience_snapshot is None) != (experience_arm_id is None):
+            raise ConfigurationError(
+                "experience snapshot and arm identity must be supplied together"
+            )
+        if (
+            experience_snapshot is not None
+            and Phase4Condition(str(config.run.condition_id)) is not Phase4Condition.DIVERSE
+        ):
+            raise ConfigurationError("experience memory requires the diverse archive condition")
         namespace = config.cache.namespace
         if config.phase4_policy.stage == "locked-test":
             namespace = f"{namespace}-{run_directory.name}"
@@ -593,22 +613,45 @@ class Phase4RunEngine:
                 )
                 if batch_size < 1:
                     break
-                selection, parent, parent_result = self._select_context(
+                selection, parent, parent_result, selected_cell = self._select_context(
                     mechanism=mechanism, database=database, budget=budget
                 )
                 role = ProposalRole.EXPLOIT
                 call_index = budget.logical_model_calls
-                request = self.proposer.build_request(
-                    task=self.prepared.task.public_view(),
-                    role=role,
-                    batch_size=batch_size,
-                    parent=parent,
-                    feedback=(
-                        _feedback(parent.candidate_id, parent_result)
-                        if parent is not None and parent_result is not None
-                        else None
-                    ),
-                )
+                if self.experience_snapshot is not None:
+                    if parent is None or parent_result is None or selected_cell is None:
+                        raise PersistenceError("experience request has no selected archive cell")
+                    retrieval = retrieve_experience_for_cell(
+                        snapshot=self.experience_snapshot,
+                        selected_cell=selected_cell,
+                        max_items=self.experience_retrieval_bounds[0],
+                        max_bytes=self.experience_retrieval_bounds[1],
+                        max_tokens=self.experience_retrieval_bounds[2],
+                    )
+                    write_content_artifact(
+                        self.run_directory / "retrieval" / f"logical-{call_index:05d}.json",
+                        canonical_json(retrieval.to_value()),
+                    )
+                    request = self.proposer.build_experience_request(
+                        task=self.prepared.task.public_view(),
+                        role=role,
+                        batch_size=batch_size,
+                        parent=parent,
+                        feedback=_feedback(parent.candidate_id, parent_result),
+                        retrieval=retrieval,
+                    )
+                else:
+                    request = self.proposer.build_request(
+                        task=self.prepared.task.public_view(),
+                        role=role,
+                        batch_size=batch_size,
+                        parent=parent,
+                        feedback=(
+                            _feedback(parent.candidate_id, parent_result)
+                            if parent is not None and parent_result is not None
+                            else None
+                        ),
+                    )
                 request = self._indexed_request(request, call_index)
                 max_output = self.config.model.max_output_tokens if self.config.model else 0
                 try:
@@ -761,7 +804,12 @@ class Phase4RunEngine:
 
     def _select_context(
         self, *, mechanism: Mechanism, database: Phase4Database, budget: Phase4BudgetState
-    ) -> tuple[JsonObject, CandidateSummary | None, OracleResult | None]:
+    ) -> tuple[
+        JsonObject,
+        CandidateSummary | None,
+        OracleResult | None,
+        ArchiveCoordinate | None,
+    ]:
         condition = Phase4Condition(str(self.config.run.condition_id))
         if condition is Phase4Condition.DIRECT:
             return (
@@ -770,6 +818,7 @@ class Phase4RunEngine:
                     "selected_branch_id": None,
                     "eligible_branch_ids": [],
                 },
+                None,
                 None,
                 None,
             )
@@ -784,6 +833,7 @@ class Phase4RunEngine:
             coordinate = mechanism.coordinate_for_branch(decision.selected_branch_id)
             pool = mechanism.candidate_summaries(coordinate=coordinate)
         else:
+            coordinate = None
             pool = mechanism.candidate_summaries()
         if not pool:
             raise PersistenceError("selected Phase 4 branch has no primary parent")
@@ -791,7 +841,7 @@ class Phase4RunEngine:
         result = _result_from_json(
             str(database.candidate_result(parent.candidate_id)["result_json"])
         )
-        return decision.to_value(), parent, result
+        return decision.to_value(), parent, result, coordinate
 
     def _dispatch_request(
         self,
@@ -1887,6 +1937,9 @@ def start_phase4_run(
     allow_live_model: bool,
     authority: Phase4Authority | None = None,
     backend: ModelBackend | None = None,
+    experience_snapshot: ExperienceMemorySnapshot | None = None,
+    experience_arm_id: str | None = None,
+    experience_retrieval_bounds: tuple[int, int, int] = (4, 4096, 4096),
 ) -> Phase4Outcome:
     from world_model_search.search.loop import validate_run_id
 
@@ -1915,6 +1968,17 @@ def start_phase4_run(
     )
     manifest["phase4_authority"] = selected_authority.to_value()
     manifest["phase4_authority_hash"] = sha256_json(selected_authority.to_value())
+    if experience_snapshot is not None:
+        manifest["experience_memory"] = {
+            "arm_id": experience_arm_id,
+            "snapshot_hash": experience_snapshot.snapshot_hash,
+            "protocol_hash": experience_snapshot.protocol_hash,
+            "retrieval_bounds": {
+                "max_items": experience_retrieval_bounds[0],
+                "max_bytes": experience_retrieval_bounds[1],
+                "max_tokens": experience_retrieval_bounds[2],
+            },
+        }
     run_directory.mkdir(parents=True, exist_ok=False)
     write_json_exclusive(run_directory / "manifest.json", manifest)
     if config.phase4_budget is None:
@@ -1941,6 +2005,9 @@ def start_phase4_run(
         config=config,
         prepared=prepared,
         backend=resolved_backend,
+        experience_snapshot=experience_snapshot,
+        experience_arm_id=experience_arm_id,
+        experience_retrieval_bounds=experience_retrieval_bounds,
     ).execute(interrupt_after=interrupt_after)
 
 
@@ -1971,6 +2038,9 @@ def resume_phase4_run(
     manifest: JsonObject,
     interrupt_after: int | None,
     allow_live_model: bool,
+    experience_snapshot: ExperienceMemorySnapshot | None = None,
+    experience_arm_id: str | None = None,
+    experience_retrieval_bounds: tuple[int, int, int] = (4, 4096, 4096),
 ) -> Phase4Outcome:
     if manifest.get("manifest_schema_version") != PHASE4_MANIFEST_SCHEMA_VERSION:
         raise PersistenceError("Phase 4 configuration requires manifest schema 5")
@@ -2002,4 +2072,7 @@ def resume_phase4_run(
         prepared=prepared,
         backend=backend,
         allow_new_dispatch=allow_new_dispatch,
+        experience_snapshot=experience_snapshot,
+        experience_arm_id=experience_arm_id,
+        experience_retrieval_bounds=experience_retrieval_bounds,
     ).execute(interrupt_after=interrupt_after)
