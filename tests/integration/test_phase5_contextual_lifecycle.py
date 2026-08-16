@@ -11,7 +11,12 @@ from world_model_search.evaluation.phase5_contextual import (
     _child_run_id,
     load_contextual_experiment_registry,
 )
-from world_model_search.memory.contextual import ContextMode, RetrievalMode
+from world_model_search.memory.contextual import (
+    ContextMode,
+    PromptProjection,
+    RetrievalMode,
+    SelectionPolicy,
+)
 from world_model_search.memory.contextual_retrieval import (
     ContextualExperienceRuntime,
     ContextualMemoryConfig,
@@ -32,9 +37,23 @@ def test_contextual_registry_freezes_all_ablation_arms() -> None:
     assert registry.arms == FROZEN_ARMS
     assert registry.memory_config.weights.error_pattern == 0
     assert registry.memory_config.exposure.enabled is False
+    assert registry.memory_config.prompt_projection is PromptProjection.FULL_GREEDY_V1
+    assert registry.memory_config.selection_policy is SelectionPolicy.SIMILARITY_RECORD_ID_V1
+    assert registry.memory_config.include_aggregate_summary is False
     assert all(
         len(_child_run_id(task_id="a" * 24, seed=55001, arm=arm)) <= 80 for arm in FROZEN_ARMS
     )
+
+
+def test_repair_smoke_registry_enables_v2_projection_and_selection() -> None:
+    registry = load_contextual_experiment_registry(
+        Path("experiments/phase5-contextual-v3-repair-smoke.yaml")
+    )
+    assert registry.arms == FROZEN_ARMS
+    assert registry.memory_config.prompt_projection is PromptProjection.COMPACT_ADAPTIVE_V2
+    assert registry.memory_config.selection_policy is SelectionPolicy.TASK_BALANCED_CONTRAST_V2
+    assert registry.memory_config.include_aggregate_summary is True
+    assert registry.memory_config.aggregate_max_signatures == 6
 
 
 def test_prompt_isolation_skips_budget_capped_children_without_prompts(

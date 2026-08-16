@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
 from world_model_search.memory.contextual import (
     MEMORY_BLOCK_SCHEMA,
+    MEMORY_BLOCK_SCHEMA_V2,
     RETRIEVAL_SCHEMA,
     ContextFeatures,
     ContextMode,
     ExperienceRecord,
+    PromptProjection,
     RetrievalMode,
+    SelectionPolicy,
 )
 from world_model_search.persistence.artifacts import read_text_artifact, write_content_artifact
 from world_model_search.serialization import (
@@ -103,6 +107,10 @@ class ContextualMemoryConfig:
     include_diverse_third: bool = False
     short_horizon_steps: int = 8
     exposure: RandomizedExposureConfig = RandomizedExposureConfig()
+    prompt_projection: PromptProjection = PromptProjection.FULL_GREEDY_V1
+    selection_policy: SelectionPolicy = SelectionPolicy.SIMILARITY_RECORD_ID_V1
+    include_aggregate_summary: bool = False
+    aggregate_max_signatures: int = 6
 
     def __post_init__(self) -> None:
         if not 0 <= self.minimum_similarity_ppm <= SIMILARITY_SCALE:
@@ -113,14 +121,25 @@ class ContextualMemoryConfig:
                 self.max_memory_bytes,
                 self.max_memory_tokens_conservative,
                 self.short_horizon_steps,
+                self.aggregate_max_signatures,
             )
             < 1
         ):
             raise ValueError("memory and horizon bounds must be positive")
+        if (
+            self.include_aggregate_summary
+            and self.prompt_projection is not PromptProjection.COMPACT_ADAPTIVE_V2
+        ):
+            raise ValueError("aggregate evidence summaries require the compact-adaptive projection")
+        if (
+            self.include_diverse_third
+            and self.selection_policy is SelectionPolicy.TASK_BALANCED_CONTRAST_V2
+        ):
+            raise ValueError("include_diverse_third applies only to the v1 selection policy")
 
     def to_value(self) -> JsonObject:
         return {
-            "schema_version": "contextual-memory-config-v1",
+            "schema_version": "contextual-memory-config-v2",
             "retrieval_mode": self.retrieval_mode.value,
             "context_mode": self.context_mode.value,
             "weights": self.weights.to_value(),
@@ -131,6 +150,10 @@ class ContextualMemoryConfig:
             "include_diverse_third": self.include_diverse_third,
             "short_horizon_steps": self.short_horizon_steps,
             "exposure": self.exposure.to_value(),
+            "prompt_projection": self.prompt_projection.value,
+            "selection_policy": self.selection_policy.value,
+            "include_aggregate_summary": self.include_aggregate_summary,
+            "aggregate_max_signatures": self.aggregate_max_signatures,
         }
 
 
@@ -356,7 +379,9 @@ def _histogram_similarity(left: ContextFeatures, right: ContextFeatures) -> int:
     return SIMILARITY_SCALE if denominator == 0 else numerator * SIMILARITY_SCALE // denominator
 
 
-def _outcome_class(record: ExperienceRecord) -> str:
+def classify_outcome(record: ExperienceRecord) -> str:
+    """Deterministic positive/neutral/negative label shared by retrieval and analysis."""
+
     outcome = record.immediate_outcome
     downstream = record.downstream_outcome
     if (
@@ -466,6 +491,57 @@ def contextual_similarity(
     return total, {name: item.to_value() for name, item in components.items()}
 
 
+def _action_signature(record: ExperienceRecord) -> tuple[str, ...]:
+    return tuple(item.value for item in record.action.edit_classes)
+
+
+def _select_task_balanced(
+    relevant: tuple[tuple[ExperienceRecord, int, int], ...],
+    config: ContextualMemoryConfig,
+) -> list[tuple[ExperienceRecord, int]]:
+    """Deterministically spread selected evidence across source tasks and action signatures."""
+
+    remaining = list(relevant)
+    selected: list[tuple[ExperienceRecord, int]] = []
+    task_use: Counter[str] = Counter()
+    signature_use: Counter[tuple[str, ...]] = Counter()
+
+    def take(item: tuple[ExperienceRecord, int, int]) -> None:
+        record, _score, rank = item
+        selected.append((record, rank))
+        remaining.remove(item)
+        task_use[record.provenance.task_id] += 1
+        signature_use[_action_signature(record)] += 1
+
+    if config.retrieval_mode is RetrievalMode.CONTRASTIVE:
+        for label in ("positive", "negative"):
+            match = next(
+                (item for item in remaining if classify_outcome(item[0]) == label),
+                None,
+            )
+            if match is not None:
+                take(match)
+        allowed = {"positive", "negative"}
+    else:
+        allowed = {"positive"}
+    while len(selected) < config.max_memory_records:
+        candidates = [item for item in remaining if classify_outcome(item[0]) in allowed]
+        if not candidates:
+            break
+        take(
+            min(
+                candidates,
+                key=lambda item: (
+                    task_use[item[0].provenance.task_id],
+                    -item[1],
+                    signature_use[_action_signature(item[0])],
+                    item[0].record_id,
+                ),
+            )
+        )
+    return selected
+
+
 class MemoryExposurePolicy:
     def decide(
         self,
@@ -529,7 +605,7 @@ class ExperienceRetriever:
             ranked_values.append((record, similarity, components))
         ranked_values.sort(key=lambda item: (-item[1], item[0].record_id))
         scored = tuple(
-            ScoredExperience(record.record_id, _outcome_class(record), score, rank, components)
+            ScoredExperience(record.record_id, classify_outcome(record), score, rank, components)
             for rank, (record, score, components) in enumerate(ranked_values, start=1)
         )
         relevant = tuple(
@@ -538,11 +614,16 @@ class ExperienceRetriever:
             if score >= config.minimum_similarity_ppm
         )
         selected: list[tuple[ExperienceRecord, int]] = []
-        if config.retrieval_mode is RetrievalMode.POSITIVE_ONLY:
+        if (
+            config.retrieval_mode is not RetrievalMode.DISABLED
+            and config.selection_policy is SelectionPolicy.TASK_BALANCED_CONTRAST_V2
+        ):
+            selected = _select_task_balanced(relevant, config)
+        elif config.retrieval_mode is RetrievalMode.POSITIVE_ONLY:
             selected.extend(
                 (record, rank)
                 for record, _score, rank in relevant
-                if _outcome_class(record) == "positive"
+                if classify_outcome(record) == "positive"
             )
             selected = selected[:1]
         elif config.retrieval_mode is RetrievalMode.CONTRASTIVE:
@@ -551,7 +632,7 @@ class ExperienceRetriever:
                     (
                         (record, rank)
                         for record, _score, rank in relevant
-                        if _outcome_class(record) == label
+                        if classify_outcome(record) == label
                     ),
                     None,
                 )
@@ -603,6 +684,10 @@ class RenderedMemoryBlock:
     shown_record_ids: tuple[str, ...]
     byte_count: int
     conservative_token_count: int
+    projection: str = PromptProjection.FULL_GREEDY_V1.value
+    detail_level: str = "full"
+    dropped_record_ids: tuple[str, ...] = ()
+    includes_aggregate: bool = False
 
     @property
     def value(self) -> JsonObject:
@@ -642,6 +727,95 @@ def _proposer_safe_record(
     }
 
 
+def _compact_record(
+    record: ExperienceRecord,
+    score: ScoredExperience,
+) -> JsonObject:
+    action = record.action
+    return {
+        "record_kind": score.outcome_class,
+        "context_similarity_ppm": score.total_similarity_ppm,
+        "context": {
+            "representation_family": record.context.representation_family,
+            "parent_score": record.context.parent_score,
+            "parent_error_count": record.context.parent_error_count,
+            "public_probe_behavior": record.context.public_probe_behavior,
+            "behavior_cluster": record.context.behavior_cluster,
+            "canonical_size": record.context.parent_canonical_size,
+            "constructor_histogram": record.context.constructor_histogram,
+            "plateau_length": record.context.plateau_length,
+            "search_step": record.context.search_step,
+        },
+        "action": {
+            "normalized_edit_classes": [item.value for item in action.edit_classes],
+            "constructors_added": list(action.constructors_added),
+            "constructors_removed": list(action.constructors_removed),
+            "operators_replaced": [list(pair) for pair in action.operators_replaced],
+            "representation_family_before": action.representation_family_before,
+            "representation_family_after": action.representation_family_after,
+            "canonical_size_delta": action.size_delta,
+            "affected_subtree_path_count": len(action.affected_paths),
+            "affected_subtree_paths_prefix": [list(path) for path in action.affected_paths[:3]],
+        },
+        "outcome": {
+            "score_delta": record.immediate_outcome.score_delta,
+            "child_score": record.immediate_outcome.child_score,
+            "exact_solution": record.immediate_outcome.exact_solution,
+            "archive_outcome": record.immediate_outcome.archive_outcome,
+            "duplicate": (
+                record.immediate_outcome.canonical_duplicate
+                or record.immediate_outcome.semantic_duplicate
+            ),
+            "short_horizon_best_score_gain": (
+                record.downstream_outcome.short_horizon_best_score_gain
+            ),
+            "eventually_had_exact_descendant_descriptive_not_causal": (
+                record.downstream_outcome.eventually_had_exact_descendant
+            ),
+        },
+    }
+
+
+def _minimal_record(
+    record: ExperienceRecord,
+    score: ScoredExperience,
+) -> JsonObject:
+    return {
+        "record_kind": score.outcome_class,
+        "normalized_edit_classes": [item.value for item in record.action.edit_classes],
+        "score_delta": record.immediate_outcome.score_delta,
+        "exact_solution": record.immediate_outcome.exact_solution,
+        "archive_outcome": record.immediate_outcome.archive_outcome,
+    }
+
+
+def _aggregate_action_outcomes(
+    relevant: tuple[ExperienceRecord, ...],
+    *,
+    maximum_signatures: int,
+) -> list[JsonValue]:
+    """Summarize outcome base rates per action signature over all relevant evidence."""
+
+    grouped: dict[tuple[str, ...], list[ExperienceRecord]] = {}
+    for record in relevant:
+        grouped.setdefault(_action_signature(record), []).append(record)
+    ordered = sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0]))
+    summaries: list[JsonValue] = []
+    for signature, records in ordered[:maximum_signatures]:
+        classes = Counter(classify_outcome(record) for record in records)
+        summaries.append(
+            {
+                "edit_classes": list(signature),
+                "observed": len(records),
+                "positive": classes.get("positive", 0),
+                "neutral": classes.get("neutral", 0),
+                "negative": classes.get("negative", 0),
+                "distinct_source_tasks": len({record.provenance.task_id for record in records}),
+            }
+        )
+    return summaries
+
+
 class MemoryBlockRenderer:
     _CONTRACT = (
         "These are observations from previous search tasks with similar contexts. "
@@ -656,6 +830,45 @@ class MemoryBlockRenderer:
         decision: RetrievalDecision,
         store: ExperienceStore,
     ) -> RenderedMemoryBlock:
+        if decision.config.prompt_projection is PromptProjection.COMPACT_ADAPTIVE_V2:
+            return self._render_compact_adaptive(decision=decision, store=store)
+        return self._render_full_greedy(decision=decision, store=store)
+
+    def _block_value(
+        self,
+        *,
+        schema: str,
+        records: list[JsonObject],
+        detail_level: str | None = None,
+        aggregate: list[JsonValue] | None = None,
+    ) -> JsonObject:
+        block: JsonObject = {
+            "schema_version": schema,
+            "evidence_contract": self._CONTRACT,
+            "cross_task_experience": cast(list[JsonValue], records),
+        }
+        if detail_level is not None:
+            block["projection_detail"] = detail_level
+        if aggregate:
+            block["aggregate_action_outcomes"] = aggregate
+        return block
+
+    def _fits(self, block: JsonObject, config: ContextualMemoryConfig) -> tuple[str, int] | None:
+        canonical = canonical_json(block)
+        byte_count = len(canonical.encode("utf-8"))
+        if (
+            byte_count <= config.max_memory_bytes
+            and byte_count <= config.max_memory_tokens_conservative
+        ):
+            return canonical, byte_count
+        return None
+
+    def _render_full_greedy(
+        self,
+        *,
+        decision: RetrievalDecision,
+        store: ExperienceStore,
+    ) -> RenderedMemoryBlock:
         scores = {score.record_id: score for score in decision.all_eligible_scores}
         values = [
             (record_id, _proposer_safe_record(store.get(record_id), scores[record_id]))
@@ -663,35 +876,114 @@ class MemoryBlockRenderer:
         ]
         accepted: list[JsonObject] = []
         accepted_ids: list[str] = []
+        dropped_ids: list[str] = []
         for record_id, value in values:
-            trial: JsonObject = {
-                "schema_version": MEMORY_BLOCK_SCHEMA,
-                "evidence_contract": self._CONTRACT,
-                "cross_task_experience": cast(list[JsonValue], [*accepted, value]),
-            }
-            rendered = canonical_json(trial)
-            byte_count = len(rendered.encode("utf-8"))
-            conservative_tokens = byte_count
+            trial = self._block_value(
+                schema=MEMORY_BLOCK_SCHEMA,
+                records=[*accepted, value],
+            )
             if (
                 len(accepted) < decision.config.max_memory_records
-                and byte_count <= decision.config.max_memory_bytes
-                and conservative_tokens <= decision.config.max_memory_tokens_conservative
+                and self._fits(trial, decision.config) is not None
             ):
                 accepted.append(value)
                 accepted_ids.append(record_id)
-        block: JsonObject = {
-            "schema_version": MEMORY_BLOCK_SCHEMA,
-            "evidence_contract": self._CONTRACT,
-            "cross_task_experience": cast(list[JsonValue], accepted),
-        }
-        canonical = canonical_json(block)
-        byte_count = len(canonical.encode("utf-8"))
-        if (
-            byte_count > decision.config.max_memory_bytes
-            or byte_count > decision.config.max_memory_tokens_conservative
-        ):
+            else:
+                dropped_ids.append(record_id)
+        block = self._block_value(schema=MEMORY_BLOCK_SCHEMA, records=accepted)
+        fitted = self._fits(block, decision.config)
+        if fitted is None:
             raise ValueError("memory bounds are too small for the canonical empty block")
-        return RenderedMemoryBlock(canonical, tuple(accepted_ids), byte_count, byte_count)
+        canonical, byte_count = fitted
+        return RenderedMemoryBlock(
+            canonical,
+            tuple(accepted_ids),
+            byte_count,
+            byte_count,
+            projection=PromptProjection.FULL_GREEDY_V1.value,
+            detail_level="full",
+            dropped_record_ids=tuple(dropped_ids),
+            includes_aggregate=False,
+        )
+
+    def _render_compact_adaptive(
+        self,
+        *,
+        decision: RetrievalDecision,
+        store: ExperienceStore,
+    ) -> RenderedMemoryBlock:
+        config = decision.config
+        scores = {score.record_id: score for score in decision.all_eligible_scores}
+        shown = [(record_id, store.get(record_id)) for record_id in decision.shown_record_ids]
+        relevant = tuple(
+            store.get(score.record_id)
+            for score in decision.all_eligible_scores
+            if score.total_similarity_ppm >= config.minimum_similarity_ppm
+        )
+        aggregate = (
+            _aggregate_action_outcomes(relevant, maximum_signatures=config.aggregate_max_signatures)
+            if config.include_aggregate_summary
+            else []
+        )
+        renderers = {"compact": _compact_record, "minimal": _minimal_record}
+        attempts: list[tuple[str, bool]] = []
+        if aggregate:
+            attempts.append(("compact", True))
+        attempts.extend((("compact", False), ("minimal", False)))
+        for detail_level, with_aggregate in attempts:
+            records = [
+                renderers[detail_level](record, scores[record_id]) for record_id, record in shown
+            ]
+            block = self._block_value(
+                schema=MEMORY_BLOCK_SCHEMA_V2,
+                records=records,
+                detail_level=detail_level,
+                aggregate=aggregate if with_aggregate else None,
+            )
+            fitted = self._fits(block, config)
+            if fitted is not None:
+                canonical, byte_count = fitted
+                return RenderedMemoryBlock(
+                    canonical,
+                    tuple(record_id for record_id, _record in shown),
+                    byte_count,
+                    byte_count,
+                    projection=PromptProjection.COMPACT_ADAPTIVE_V2.value,
+                    detail_level=detail_level,
+                    dropped_record_ids=(),
+                    includes_aggregate=with_aggregate,
+                )
+        accepted: list[JsonObject] = []
+        accepted_ids: list[str] = []
+        dropped_ids: list[str] = []
+        for record_id, record in shown:
+            trial = self._block_value(
+                schema=MEMORY_BLOCK_SCHEMA_V2,
+                records=[*accepted, _minimal_record(record, scores[record_id])],
+                detail_level="minimal",
+            )
+            if len(accepted) < config.max_memory_records and self._fits(trial, config) is not None:
+                accepted.append(_minimal_record(record, scores[record_id]))
+                accepted_ids.append(record_id)
+            else:
+                dropped_ids.append(record_id)
+        block = self._block_value(
+            schema=MEMORY_BLOCK_SCHEMA_V2, records=accepted, detail_level="minimal"
+        )
+        fitted = self._fits(block, config)
+        if fitted is None:
+            raise ValueError("memory bounds are too small for the canonical empty block")
+        canonical, byte_count = fitted
+        return RenderedMemoryBlock(
+            canonical,
+            tuple(accepted_ids),
+            byte_count,
+            byte_count,
+            projection=PromptProjection.COMPACT_ADAPTIVE_V2.value,
+            detail_level="minimal",
+            dropped_record_ids=tuple(dropped_ids),
+            includes_aggregate=False,
+        )
 
 
 @dataclass(frozen=True, slots=True)

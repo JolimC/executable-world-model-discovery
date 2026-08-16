@@ -27,6 +27,7 @@ AST_DELTA_SCHEMA = "deterministic-typed-ast-delta-v1"
 CONTEXT_SCHEMA = "public-context-features-v1"
 RETRIEVAL_SCHEMA = "nearest-contextual-experience-retrieval-v1"
 MEMORY_BLOCK_SCHEMA = "cross-task-experience-block-v1"
+MEMORY_BLOCK_SCHEMA_V2 = "cross-task-experience-block-v2"
 
 
 class EditClass(StrEnum):
@@ -59,6 +60,16 @@ class RetrievalMode(StrEnum):
 class ContextMode(StrEnum):
     FAMILY_ONLY = "representation-family-only"
     RICH = "rich-context"
+
+
+class PromptProjection(StrEnum):
+    FULL_GREEDY_V1 = "full-greedy-v1"
+    COMPACT_ADAPTIVE_V2 = "compact-adaptive-v2"
+
+
+class SelectionPolicy(StrEnum):
+    SIMILARITY_RECORD_ID_V1 = "similarity-record-id-v1"
+    TASK_BALANCED_CONTRAST_V2 = "task-balanced-contrast-v2"
 
 
 @dataclass(frozen=True, slots=True)

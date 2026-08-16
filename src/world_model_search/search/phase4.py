@@ -686,6 +686,10 @@ class Phase4RunEngine:
                             "byte_count": memory_block.byte_count,
                             "conservative_token_count": (memory_block.conservative_token_count),
                             "canonical_block_hash": sha256_text(memory_block.canonical_json_block),
+                            "projection": memory_block.projection,
+                            "detail_level": memory_block.detail_level,
+                            "dropped_record_ids": list(memory_block.dropped_record_ids),
+                            "includes_aggregate": memory_block.includes_aggregate,
                         },
                     }
                     write_content_artifact(

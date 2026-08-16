@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from world_model_search.memory.contextual import MEMORY_BLOCK_SCHEMA
+from world_model_search.memory.contextual import MEMORY_BLOCK_SCHEMA, MEMORY_BLOCK_SCHEMA_V2
 from world_model_search.memory.contextual_retrieval import RenderedMemoryBlock
 from world_model_search.serialization import canonical_json, parse_json_object
 
 CONTEXTUAL_SEARCH_PROMPT_VERSION = "phase5-contextual-experience-search-v1"
 CONTEXTUAL_PROMPT_FIELD = "cross_task_memory"
+_ACCEPTED_BLOCK_SCHEMAS = frozenset({MEMORY_BLOCK_SCHEMA, MEMORY_BLOCK_SCHEMA_V2})
 
 
 def inject_contextual_memory(
@@ -19,7 +20,7 @@ def inject_contextual_memory(
     if CONTEXTUAL_PROMPT_FIELD in payload:
         raise ValueError("base prompt already contains contextual memory")
     block = memory_block.value
-    if block.get("schema_version") != MEMORY_BLOCK_SCHEMA:
+    if block.get("schema_version") not in _ACCEPTED_BLOCK_SCHEMAS:
         raise ValueError("contextual memory block schema is invalid")
     payload[CONTEXTUAL_PROMPT_FIELD] = block
     return canonical_json(payload)
@@ -34,10 +35,9 @@ def assert_contextual_prompt_isolation(control_prompt: str, treatment_prompt: st
     treatment_memory = treatment.pop(CONTEXTUAL_PROMPT_FIELD, None)
     if not isinstance(control_memory, dict) or not isinstance(treatment_memory, dict):
         raise ValueError("paired prompts must both contain contextual memory blocks")
-    if (
-        control_memory.get("schema_version") != MEMORY_BLOCK_SCHEMA
-        or treatment_memory.get("schema_version") != MEMORY_BLOCK_SCHEMA
-    ):
+    if control_memory.get("schema_version") not in _ACCEPTED_BLOCK_SCHEMAS or control_memory.get(
+        "schema_version"
+    ) != treatment_memory.get("schema_version"):
         raise ValueError("paired prompt memory schema differs")
     if control != treatment:
         raise ValueError("control/treatment prompts differ outside contextual memory")

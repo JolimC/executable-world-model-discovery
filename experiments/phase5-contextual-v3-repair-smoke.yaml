@@ -1,0 +1,64 @@
+experiment_schema_version: 1
+experiment_id: phase5-contextual-v3-repair-smoke
+status: provider-free-smoke
+base_config: configs/phase4-fake-smoke.yaml
+source:
+  run_root: artifacts/phase4-runs/phase4-primary-pilot-v2
+  run_suffix: -C
+  expected_condition: uniform-diverse-archive-v1
+  expected_task_ids:
+    - 01dda10a838f4423e72b90b8
+    - 01fa64a668ef5086dc713454
+    - 0bcf2a466f9f62472b0604d7
+    - 1400d05ad196c9fa802cd094
+    - 1cddb7fea9c43ce8b5f93584
+    - 23582946627e0949dc02e473
+    - 23abc8920b7d2ea2bb1bf9cf
+    - 2b41ea8918fa2be0a0389e8c
+    - 2e323a2b94479b332489f218
+    - 30bccf698deb8ce78d0fef77
+snapshot_path: artifacts/phase5-contextual-v3/repair-smoke/memory-snapshot.json
+target:
+  split: training
+  task_ids:
+    - d737b0ee219de6a676c139d1
+search_seeds:
+  - 20260816
+arms:
+  - A-no-memory
+  - B-positive-rich
+  - C-contrastive-rich
+  - D-family-only
+  - D-rich-context
+output_root: artifacts/phase5-contextual-v3/repair-smoke
+runs_root: artifacts/phase5-contextual-v3/repair-smoke/runs
+memory:
+  minimum_similarity_ppm: 300000
+  max_memory_records: 3
+  max_memory_bytes: 4096
+  max_memory_tokens_conservative: 4096
+  include_diverse_third: false
+  short_horizon_steps: 8
+  prompt_projection: compact-adaptive-v2
+  selection_policy: task-balanced-contrast-v2
+  include_aggregate_summary: true
+  aggregate_max_signatures: 6
+  weights:
+    representation_family: 400
+    behavior_cluster: 150
+    error_pattern: 0
+    score_error_count: 150
+    ast_constructor_histogram: 100
+    structural_motifs: 100
+    plateau: 50
+    search_stage: 50
+  randomized_exposure:
+    enabled: false
+    probability_numerator: 1
+    probability_denominator: 2
+    randomization_seed: 20260815
+matched_contract:
+  condition: uniform-diverse-archive-v1
+  scheduler: uniform-sorted-branches-v1
+  sole_arm_difference: canonical-cross-task-memory-block-v1
+  sealed_results_reusable: false

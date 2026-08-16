@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
+
+import pytest
 
 from world_model_search.domain.types import (
     CandidateSummary,
@@ -13,7 +16,15 @@ from world_model_search.domain.types import (
     PublicWorldSpec,
     SplitLabel,
 )
-from world_model_search.dsl.ast import And, At, Not
+from world_model_search.dsl.ast import And, At, BitExpr, Not, Or, Xor
+from world_model_search.errors import ConfigurationError
+from world_model_search.evaluation.phase5_contextual import (
+    FROZEN_ARMS,
+    ContextualExperimentRegistry,
+    _uptake_counts,
+    enforce_arm_distinctness,
+    preflight_arm_distinctness,
+)
 from world_model_search.memory.contextual import (
     PENDING_DOWNSTREAM,
     ContextFeatureExtractor,
@@ -26,7 +37,9 @@ from world_model_search.memory.contextual import (
     ExperienceProvenance,
     ExperienceRecord,
     ImmediateOutcome,
+    PromptProjection,
     RetrievalMode,
+    SelectionPolicy,
     extract_ast_delta,
 )
 from world_model_search.memory.contextual_retrieval import (
@@ -37,6 +50,7 @@ from world_model_search.memory.contextual_retrieval import (
     MemoryBlockRenderer,
     RandomizedExposureConfig,
     RenderedMemoryBlock,
+    _aggregate_action_outcomes,
 )
 from world_model_search.model.contextual_prompts import (
     assert_contextual_prompt_isolation,
@@ -436,3 +450,254 @@ def test_memoryless_and_treatment_prompts_differ_only_in_memory_block() -> None:
         memory_block=block(treatment_store, RetrievalMode.POSITIVE_ONLY),
     )
     assert_contextual_prompt_isolation(control, treatment)
+
+
+def _deep_ast(depth: int) -> BitExpr:
+    positions = (-1, 0, 1)
+    expr: BitExpr = At(0)
+    for index in range(depth):
+        expr = And(
+            Xor(At(positions[index % 3]), expr),
+            Or(At(positions[(index + 1) % 3]), Not(At(positions[(index + 2) % 3]))),
+        )
+    return expr
+
+
+def _bulky_record(
+    task_id: str,
+    *,
+    score_delta: int,
+    archive_outcome: str = "inserted",
+) -> ExperienceRecord:
+    base = _annotated_record(task_id, score_delta=score_delta, archive_outcome=archive_outcome)
+    return replace(base, action=extract_ast_delta(_deep_ast(20), Xor(_deep_ast(20), At(1))))
+
+
+def _compact_config() -> ContextualMemoryConfig:
+    return ContextualMemoryConfig(
+        retrieval_mode=RetrievalMode.CONTRASTIVE,
+        minimum_similarity_ppm=0,
+        prompt_projection=PromptProjection.COMPACT_ADAPTIVE_V2,
+        selection_policy=SelectionPolicy.TASK_BALANCED_CONTRAST_V2,
+        include_aggregate_summary=True,
+    )
+
+
+def _rendered(store: ExperienceStore, config: ContextualMemoryConfig) -> RenderedMemoryBlock:
+    decision = ExperienceRetriever().retrieve(
+        store=store,
+        current_context=_context(),
+        current_task_id="target",
+        forbidden_task_ids=frozenset(),
+        search_seed=1,
+        retrieval_index=0,
+        config=config,
+    )
+    return MemoryBlockRenderer().render(decision=decision, store=store)
+
+
+def test_default_config_preserves_v1_projection_and_selection() -> None:
+    config = ContextualMemoryConfig()
+    assert config.prompt_projection is PromptProjection.FULL_GREEDY_V1
+    assert config.selection_policy is SelectionPolicy.SIMILARITY_RECORD_ID_V1
+    assert config.include_aggregate_summary is False
+    with pytest.raises(ValueError):
+        ContextualMemoryConfig(include_aggregate_summary=True)
+    with pytest.raises(ValueError):
+        ContextualMemoryConfig(
+            include_diverse_third=True,
+            selection_policy=SelectionPolicy.TASK_BALANCED_CONTRAST_V2,
+        )
+
+
+def test_compact_adaptive_projection_preserves_contrast_within_budget() -> None:
+    positive = _bulky_record("source-positive", score_delta=1)
+    negative = _bulky_record("source-negative", score_delta=-1, archive_outcome="rejected")
+    store = ExperienceStore(_snapshot(positive, negative))
+    legacy = ContextualMemoryConfig(
+        retrieval_mode=RetrievalMode.CONTRASTIVE,
+        minimum_similarity_ppm=0,
+    )
+    legacy_block = _rendered(store, legacy)
+    compact_block = _rendered(store, _compact_config())
+    assert len(legacy_block.shown_record_ids) < 2
+    assert legacy_block.dropped_record_ids
+    assert len(compact_block.shown_record_ids) == 2
+    assert compact_block.byte_count <= legacy.max_memory_bytes
+    assert compact_block.projection == PromptProjection.COMPACT_ADAPTIVE_V2.value
+    assert compact_block.value["schema_version"] == "cross-task-experience-block-v2"
+    experiences = compact_block.value["cross_task_experience"]
+    assert isinstance(experiences, list)
+    kinds = {item["record_kind"] for item in experiences if isinstance(item, dict)}
+    assert kinds == {"positive", "negative"}
+    assert "task_id" not in compact_block.canonical_json_block
+    assert "run_id" not in compact_block.canonical_json_block
+
+
+def test_aggregate_summary_reports_base_rates_and_caps_signatures() -> None:
+    positive = _bulky_record("source-positive", score_delta=1)
+    negative = _bulky_record("source-negative", score_delta=-1, archive_outcome="rejected")
+    neutral = _annotated_record("source-neutral", score_delta=0)
+    entries = _aggregate_action_outcomes((positive, negative, neutral), maximum_signatures=6)
+    assert len(entries) == 2
+    first = entries[0]
+    assert isinstance(first, dict)
+    assert first["observed"] == 2
+    assert first["positive"] == 1
+    assert first["negative"] == 1
+    assert first["distinct_source_tasks"] == 2
+    assert len(_aggregate_action_outcomes((positive, negative, neutral), maximum_signatures=1)) == 1
+    block = _rendered(ExperienceStore(_snapshot(positive, negative)), _compact_config())
+    assert block.includes_aggregate
+    aggregate = block.value["aggregate_action_outcomes"]
+    assert isinstance(aggregate, list) and aggregate
+
+
+def test_task_balanced_selection_spreads_source_tasks() -> None:
+    def positive(task_id: str, child: str) -> ExperienceRecord:
+        record = _annotated_record(task_id, score_delta=1)
+        return replace(
+            record,
+            provenance=replace(record.provenance, child_candidate_id=child),
+        )
+
+    crowded = tuple(positive("task-a", f"child-{index}") for index in range(3))
+    lone = positive("task-b", "child-lone")
+    snapshot = ExperienceSnapshot(
+        ("task-a", "task-b"),
+        (*crowded, lone),
+        ("h0", "h1", "h2", "h3"),
+    )
+    store = ExperienceStore(snapshot)
+
+    def selected(config: ContextualMemoryConfig) -> tuple[str, ...]:
+        return (
+            ExperienceRetriever()
+            .retrieve(
+                store=store,
+                current_context=_context(),
+                current_task_id="target",
+                forbidden_task_ids=frozenset(),
+                search_seed=1,
+                retrieval_index=0,
+                config=config,
+            )
+            .selected_record_ids
+        )
+
+    v1 = selected(
+        ContextualMemoryConfig(retrieval_mode=RetrievalMode.POSITIVE_ONLY, minimum_similarity_ppm=0)
+    )
+    assert len(v1) == 1
+    v2 = selected(
+        ContextualMemoryConfig(
+            retrieval_mode=RetrievalMode.POSITIVE_ONLY,
+            minimum_similarity_ppm=0,
+            selection_policy=SelectionPolicy.TASK_BALANCED_CONTRAST_V2,
+        )
+    )
+    assert len(v2) == 3
+    assert lone.record_id in v2
+    tasks = {store.get(record_id).provenance.task_id for record_id in v2}
+    assert tasks == {"task-a", "task-b"}
+
+
+def test_isolation_accepts_v2_blocks_and_rejects_schema_mismatch() -> None:
+    positive = _bulky_record("source-positive", score_delta=1)
+    negative = _bulky_record("source-negative", score_delta=-1, archive_outcome="rejected")
+    store = ExperienceStore(_snapshot(positive, negative))
+    compact = _compact_config()
+    candidate_id = "a" * 64
+    _template, _version, base = render_prompt(
+        task=_task("target"),
+        role=ProposalRole.EXPLOIT,
+        requested_batch_size=1,
+        parent=CandidateSummary(candidate_id, At(0)),
+        feedback=ParentScoreFeedback(candidate_id, True, True, 2, 8, False, 12, 4, 16),
+    )
+    control = inject_contextual_memory(
+        base_prompt=base,
+        memory_block=_rendered(
+            ExperienceStore(None), replace(compact, retrieval_mode=RetrievalMode.DISABLED)
+        ),
+    )
+    treatment = inject_contextual_memory(
+        base_prompt=base,
+        memory_block=_rendered(store, compact),
+    )
+    assert_contextual_prompt_isolation(control, treatment)
+    v1_control = inject_contextual_memory(
+        base_prompt=base,
+        memory_block=_rendered(
+            ExperienceStore(None),
+            ContextualMemoryConfig(retrieval_mode=RetrievalMode.DISABLED),
+        ),
+    )
+    with pytest.raises(ValueError, match="schema differs"):
+        assert_contextual_prompt_isolation(v1_control, treatment)
+
+
+def test_uptake_counts_measure_shown_edit_overlap() -> None:
+    counts = _uptake_counts(
+        shown_edit_classes_by_logical={
+            0: frozenset({"ADD_NEGATION"}),
+            1: frozenset({"INTRODUCE_COUNT"}),
+            2: frozenset(),
+        },
+        requests_by_logical={0: (0,), 1: (1, 2)},
+        child_edit_classes_by_request={
+            0: (frozenset({"ADD_NEGATION", "EXPAND_SUBTREE"}), frozenset({"OTHER"})),
+            2: (frozenset({"INTRODUCE_COUNT"}),),
+        },
+    )
+    assert counts == {
+        "memory_shown_request_count": 2,
+        "children_after_shown_memory": 3,
+        "children_matching_shown_edit_classes": 2,
+    }
+
+
+def _preflight_registry(
+    memory_config: ContextualMemoryConfig,
+    *,
+    status: str = "controlled-development",
+) -> ContextualExperimentRegistry:
+    return ContextualExperimentRegistry(
+        experiment_id="unit-preflight",
+        status=status,
+        base_config=Path("configs/phase4-fake-smoke.yaml"),
+        source_run_root=Path("artifacts/none"),
+        source_run_suffix="-C",
+        expected_source_task_ids=("source-negative", "source-positive"),
+        snapshot_path=Path("artifacts/none/memory-snapshot.json"),
+        target_split=SplitLabel.DEVELOPMENT,
+        target_task_ids=("target",),
+        search_seeds=(1,),
+        arms=FROZEN_ARMS,
+        output_root=Path("artifacts/none/out"),
+        runs_root=Path("artifacts/none/runs"),
+        memory_config=memory_config,
+        raw={},
+    )
+
+
+def test_preflight_blocks_indistinguishable_contrast_and_passes_compact_repair() -> None:
+    positive = _bulky_record("source-positive", score_delta=1)
+    negative = _bulky_record("source-negative", score_delta=-1, archive_outcome="rejected")
+    snapshot = _snapshot(positive, negative)
+    legacy = ContextualMemoryConfig(retrieval_mode=RetrievalMode.CONTRASTIVE)
+    legacy_registry = _preflight_registry(legacy)
+    legacy_report = preflight_arm_distinctness(registry=legacy_registry, snapshot=snapshot)
+    assert legacy_report.snapshot_has_negative_records
+    with pytest.raises(ConfigurationError):
+        enforce_arm_distinctness(registry=legacy_registry, report=legacy_report)
+    smoke_registry = _preflight_registry(legacy, status="provider-free-smoke")
+    enforce_arm_distinctness(registry=smoke_registry, report=legacy_report)
+    compact_registry = _preflight_registry(_compact_config())
+    compact_report = preflight_arm_distinctness(registry=compact_registry, snapshot=snapshot)
+    assert compact_report.c_differs_from_b_context_count >= 1
+    assert compact_report.b_differs_from_empty_context_count >= 1
+    assert (
+        compact_report.b_matches_d_rich_context_count == compact_report.representative_context_count
+    )
+    enforce_arm_distinctness(registry=compact_registry, report=compact_report)

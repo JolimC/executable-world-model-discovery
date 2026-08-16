@@ -21,16 +21,22 @@ from world_model_search.memory.contextual import (
     ContextMode,
     DownstreamOutcomeAnnotator,
     ExperienceRecord,
+    PromptProjection,
     RetrievalMode,
+    SelectionPolicy,
     create_experience_record,
     extract_ast_delta,
 )
 from world_model_search.memory.contextual_retrieval import (
     ContextualExperienceRuntime,
     ContextualMemoryConfig,
+    ExperienceRetriever,
     ExperienceSnapshot,
+    ExperienceStore,
+    MemoryBlockRenderer,
     RandomizedExposureConfig,
     SimilarityWeights,
+    classify_outcome,
 )
 from world_model_search.model.contextual_prompts import assert_contextual_prompt_isolation
 from world_model_search.persistence.artifacts import read_text_artifact, write_content_artifact
@@ -50,15 +56,17 @@ from world_model_search.search.phase4 import (
 )
 from world_model_search.serialization import (
     JsonObject,
+    JsonValue,
     canonical_json,
     parse_json_object,
     sha256_bytes,
     sha256_json,
+    sha256_text,
 )
 from world_model_search.tasks import benchmark_root_for_config, load_public_task
 
 CONTEXTUAL_EXPERIMENT_SCHEMA = 1
-CONTEXTUAL_ANALYSIS_SCHEMA = "phase5-contextual-experiment-analysis-v1"
+CONTEXTUAL_ANALYSIS_SCHEMA = "phase5-contextual-experiment-analysis-v2"
 FROZEN_ARMS = (
     "A-no-memory",
     "B-positive-rich",
@@ -75,10 +83,16 @@ ARM_RUN_CODES = {
 }
 
 
-def _mapping(value: object, keys: set[str], label: str) -> dict[str, object]:
+def _mapping(
+    value: object,
+    keys: set[str],
+    label: str,
+    *,
+    optional: frozenset[str] = frozenset(),
+) -> dict[str, object]:
     if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
         raise ConfigurationError(f"{label} must be a mapping")
-    if set(value) != keys:
+    if keys - set(value) or set(value) - keys - optional:
         raise ConfigurationError(f"{label} has missing or unknown fields")
     return value
 
@@ -227,6 +241,14 @@ def load_contextual_experiment_registry(path: Path) -> ContextualExperimentRegis
             "randomized_exposure",
         },
         "memory",
+        optional=frozenset(
+            {
+                "prompt_projection",
+                "selection_policy",
+                "include_aggregate_summary",
+                "aggregate_max_signatures",
+            }
+        ),
     )
     weights_raw = _mapping(memory["weights"], set(SimilarityWeights().to_value()), "weights")
     weights = SimilarityWeights(
@@ -247,22 +269,49 @@ def load_contextual_experiment_registry(path: Path) -> ContextualExperimentRegis
     )
     if not isinstance(memory["include_diverse_third"], bool):
         raise ConfigurationError("include_diverse_third must be Boolean")
-    config = ContextualMemoryConfig(
-        minimum_similarity_ppm=_integer(memory["minimum_similarity_ppm"], "minimum_similarity_ppm"),
-        max_memory_records=_integer(memory["max_memory_records"], "max_memory_records", minimum=1),
-        max_memory_bytes=_integer(memory["max_memory_bytes"], "max_memory_bytes", minimum=1),
-        max_memory_tokens_conservative=_integer(
-            memory["max_memory_tokens_conservative"],
-            "max_memory_tokens_conservative",
-            minimum=1,
-        ),
-        include_diverse_third=memory["include_diverse_third"],
-        short_horizon_steps=_integer(
-            memory["short_horizon_steps"], "short_horizon_steps", minimum=1
-        ),
-        weights=weights,
-        exposure=exposure,
-    )
+    try:
+        projection = PromptProjection(
+            str(memory.get("prompt_projection", PromptProjection.FULL_GREEDY_V1.value))
+        )
+        selection_policy = SelectionPolicy(
+            str(memory.get("selection_policy", SelectionPolicy.SIMILARITY_RECORD_ID_V1.value))
+        )
+    except ValueError as exc:
+        raise ConfigurationError("contextual memory projection/selection is invalid") from exc
+    include_aggregate = memory.get("include_aggregate_summary", False)
+    if not isinstance(include_aggregate, bool):
+        raise ConfigurationError("include_aggregate_summary must be Boolean")
+    try:
+        config = ContextualMemoryConfig(
+            minimum_similarity_ppm=_integer(
+                memory["minimum_similarity_ppm"], "minimum_similarity_ppm"
+            ),
+            max_memory_records=_integer(
+                memory["max_memory_records"], "max_memory_records", minimum=1
+            ),
+            max_memory_bytes=_integer(memory["max_memory_bytes"], "max_memory_bytes", minimum=1),
+            max_memory_tokens_conservative=_integer(
+                memory["max_memory_tokens_conservative"],
+                "max_memory_tokens_conservative",
+                minimum=1,
+            ),
+            include_diverse_third=memory["include_diverse_third"],
+            short_horizon_steps=_integer(
+                memory["short_horizon_steps"], "short_horizon_steps", minimum=1
+            ),
+            weights=weights,
+            exposure=exposure,
+            prompt_projection=projection,
+            selection_policy=selection_policy,
+            include_aggregate_summary=include_aggregate,
+            aggregate_max_signatures=_integer(
+                memory.get("aggregate_max_signatures", 6),
+                "aggregate_max_signatures",
+                minimum=1,
+            ),
+        )
+    except ValueError as exc:
+        raise ConfigurationError(f"contextual memory configuration is invalid: {exc}") from exc
     contract = _mapping(
         root["matched_contract"],
         {"condition", "scheduler", "sole_arm_difference", "sealed_results_reusable"},
@@ -591,6 +640,112 @@ def _arm_runtime(
     return ContextualExperienceRuntime(arm, source, config, target_task_ids)
 
 
+@dataclass(frozen=True, slots=True)
+class ArmDistinctnessReport:
+    representative_context_count: int
+    b_matches_d_rich_context_count: int
+    c_differs_from_b_context_count: int
+    d_family_differs_from_b_context_count: int
+    b_differs_from_empty_context_count: int
+    snapshot_has_negative_records: bool
+
+    def to_value(self) -> JsonObject:
+        return {
+            "schema_version": "contextual-arm-distinctness-preflight-v1",
+            "representative_context_count": self.representative_context_count,
+            "b_matches_d_rich_context_count": self.b_matches_d_rich_context_count,
+            "c_differs_from_b_context_count": self.c_differs_from_b_context_count,
+            "d_family_differs_from_b_context_count": self.d_family_differs_from_b_context_count,
+            "b_differs_from_empty_context_count": self.b_differs_from_empty_context_count,
+            "snapshot_has_negative_records": self.snapshot_has_negative_records,
+        }
+
+
+def preflight_arm_distinctness(
+    *,
+    registry: ContextualExperimentRegistry,
+    snapshot: ExperienceSnapshot,
+    maximum_contexts: int = 6,
+) -> ArmDistinctnessReport:
+    """Render every arm's memory block on representative contexts before any dispatch."""
+
+    target_ids = tuple(sorted(registry.target_task_ids))
+    representative: list[ExperienceRecord] = []
+    for task_id in snapshot.source_task_ids:
+        candidates = sorted(
+            (record for record in snapshot.records if record.provenance.task_id == task_id),
+            key=lambda record: record.record_id,
+        )
+        if candidates:
+            representative.append(candidates[0])
+    representative = representative[:maximum_contexts]
+    blocks: dict[str, list[str]] = {}
+    for arm in registry.arms:
+        runtime = _arm_runtime(
+            arm=arm,
+            snapshot=snapshot,
+            base=registry.memory_config,
+            target_task_ids=target_ids,
+        )
+        store = ExperienceStore(runtime.snapshot)
+        hashes: list[str] = []
+        for index, record in enumerate(representative):
+            decision = ExperienceRetriever().retrieve(
+                store=store,
+                current_context=record.context,
+                current_task_id=target_ids[0],
+                forbidden_task_ids=frozenset(target_ids),
+                search_seed=registry.search_seeds[0],
+                retrieval_index=index,
+                config=runtime.config,
+            )
+            block = MemoryBlockRenderer().render(decision=decision, store=store)
+            hashes.append(sha256_text(block.canonical_json_block))
+        blocks[arm] = hashes
+
+    def differing(first: str, second: str) -> int:
+        return sum(left != right for left, right in zip(blocks[first], blocks[second], strict=True))
+
+    return ArmDistinctnessReport(
+        representative_context_count=len(representative),
+        b_matches_d_rich_context_count=(
+            len(representative) - differing("B-positive-rich", "D-rich-context")
+        ),
+        c_differs_from_b_context_count=differing("B-positive-rich", "C-contrastive-rich"),
+        d_family_differs_from_b_context_count=differing("B-positive-rich", "D-family-only"),
+        b_differs_from_empty_context_count=differing("A-no-memory", "B-positive-rich"),
+        snapshot_has_negative_records=any(
+            classify_outcome(record) == "negative" for record in snapshot.records
+        ),
+    )
+
+
+def enforce_arm_distinctness(
+    *,
+    registry: ContextualExperimentRegistry,
+    report: ArmDistinctnessReport,
+) -> None:
+    """Fail closed before spend when arms cannot produce their intended prompt contrasts."""
+
+    if report.b_matches_d_rich_context_count != report.representative_context_count:
+        raise ConfigurationError(
+            "B-positive-rich and D-rich-context must render identical replicate blocks"
+        )
+    if registry.status != "controlled-development":
+        return
+    if report.representative_context_count < 1:
+        raise ConfigurationError("arm distinctness preflight found no representative contexts")
+    if report.snapshot_has_negative_records and report.c_differs_from_b_context_count < 1:
+        raise ConfigurationError(
+            "contrastive arm renders identically to positive-only under the frozen memory "
+            "budget; repair the projection or budget before dispatch"
+        )
+    if report.b_differs_from_empty_context_count < 1:
+        raise ConfigurationError(
+            "positive memory arm never rendered any evidence on representative contexts"
+        )
+
+
 def _child_config(
     base: AppConfig,
     *,
@@ -630,6 +785,7 @@ def contextual_experiment_dry_run(
         raise ConfigurationError("frozen snapshot source tasks differ from the registry")
     base = load_config(repository_root / registry.base_config)
     children = len(registry.target_task_ids) * len(registry.search_seeds) * len(registry.arms)
+    distinctness = preflight_arm_distinctness(registry=registry, snapshot=snapshot)
     return {
         "schema_version": "contextual-experiment-dry-run-v1",
         "experiment_id": registry.experiment_id,
@@ -641,6 +797,7 @@ def contextual_experiment_dry_run(
         "provider_id": base.model.provider_id if base.model else None,
         "new_provider_calls": 0,
         "scheduler": "uniform-sorted-branches-v1-unchanged",
+        "arm_distinctness": distinctness.to_value(),
     }
 
 
@@ -660,24 +817,152 @@ def _check_pair_prompt_isolation(control: Path, treatment: Path) -> bool:
     return True
 
 
+def _retrieval_audit_values(run_directory: Path) -> tuple[JsonObject, ...]:
+    return tuple(
+        parse_json_object(read_text_artifact(path))
+        for path in sorted((run_directory / "experience_v3" / "retrieval").glob("*.json"))
+    )
+
+
+def _tie_statistics(
+    audits: tuple[JsonObject, ...],
+    task_by_record: dict[str, str],
+) -> dict[str, float | int]:
+    """Measure how many eligible records tie at the top similarity per retrieval."""
+
+    tie_counts: list[int] = []
+    distinct_tasks: list[int] = []
+    for audit in audits:
+        retrieval = audit.get("retrieval")
+        scores = retrieval.get("all_eligible_scores") if isinstance(retrieval, dict) else None
+        if not isinstance(scores, list) or not scores:
+            continue
+        by_record: dict[str, int] = {}
+        for item in scores:
+            if not isinstance(item, dict):
+                continue
+            value = item.get("total_similarity_ppm")
+            if isinstance(value, bool) or not isinstance(value, int):
+                continue
+            by_record[str(item.get("record_id"))] = value
+        if not by_record:
+            continue
+        best = max(by_record.values())
+        tied = [record_id for record_id, value in by_record.items() if value == best]
+        tie_counts.append(len(tied))
+        distinct_tasks.append(len({task_by_record.get(record_id, "") for record_id in tied}))
+    return {
+        "top_similarity_tie_count_mean": (sum(tie_counts) / len(tie_counts) if tie_counts else 0.0),
+        "top_similarity_tie_count_max": max(tie_counts, default=0),
+        "top_tie_distinct_source_tasks_max": max(distinct_tasks, default=0),
+    }
+
+
+def _uptake_counts(
+    *,
+    shown_edit_classes_by_logical: dict[int, frozenset[str]],
+    requests_by_logical: dict[int, tuple[int, ...]],
+    child_edit_classes_by_request: dict[int, tuple[frozenset[str], ...]],
+) -> dict[str, int]:
+    """Descriptive overlap between shown memory edits and subsequent proposals (not causal)."""
+
+    memory_requests = 0
+    children_after = 0
+    children_matching = 0
+    for logical_index in sorted(shown_edit_classes_by_logical):
+        shown = shown_edit_classes_by_logical[logical_index]
+        request_indices = requests_by_logical.get(logical_index, ())
+        if not shown or not request_indices:
+            continue
+        memory_requests += 1
+        children = [
+            child
+            for request_index in request_indices
+            for child in child_edit_classes_by_request.get(request_index, ())
+        ]
+        children_after += len(children)
+        children_matching += sum(bool(child & shown) for child in children)
+    return {
+        "memory_shown_request_count": memory_requests,
+        "children_after_shown_memory": children_after,
+        "children_matching_shown_edit_classes": children_matching,
+    }
+
+
+def _run_uptake(
+    run_directory: Path,
+    audits: tuple[JsonObject, ...],
+    edit_classes_by_record: dict[str, frozenset[str]],
+) -> dict[str, int]:
+    shown_by_logical: dict[int, frozenset[str]] = {}
+    for audit in audits:
+        retrieval = audit.get("retrieval")
+        rendered = audit.get("rendered_memory")
+        if not isinstance(retrieval, dict) or not isinstance(rendered, dict):
+            continue
+        logical_index = retrieval.get("retrieval_index")
+        shown = rendered.get("shown_record_ids")
+        if not isinstance(logical_index, int) or not isinstance(shown, list) or not shown:
+            continue
+        classes: set[str] = set()
+        for record_id in shown:
+            classes |= edit_classes_by_record.get(str(record_id), frozenset())
+        shown_by_logical[logical_index] = frozenset(classes)
+    requests_by_logical: dict[int, tuple[int, ...]] = {}
+    database_path = run_directory / "run.sqlite3"
+    if shown_by_logical and database_path.is_file():
+        with Phase4Database(database_path, read_only=True) as database:
+            for row in database.connection.execute(
+                "SELECT request_index, logical_call_index FROM model_request ORDER BY request_index"
+            ):
+                logical_index = int(row["logical_call_index"])
+                requests_by_logical[logical_index] = (
+                    *requests_by_logical.get(logical_index, ()),
+                    int(row["request_index"]),
+                )
+    child_by_request: dict[int, tuple[frozenset[str], ...]] = {}
+    records_path = run_directory / "experience_v3" / "records.jsonl"
+    if shown_by_logical and records_path.is_file():
+        for line in read_text_artifact(records_path).splitlines():
+            if not line:
+                continue
+            record = ExperienceRecord.from_value(parse_json_object(line))
+            request_index = record.provenance.request_index
+            child_by_request[request_index] = (
+                *child_by_request.get(request_index, ()),
+                frozenset(item.value for item in record.action.edit_classes),
+            )
+    return _uptake_counts(
+        shown_edit_classes_by_logical=shown_by_logical,
+        requests_by_logical=requests_by_logical,
+        child_edit_classes_by_request=child_by_request,
+    )
+
+
 def _analyze_experiment(
     *,
     repository_root: Path,
     registry: ContextualExperimentRegistry,
     outcomes: list[tuple[str, str, int, Phase4Outcome]],
+    snapshot: ExperienceSnapshot,
 ) -> JsonObject:
+    task_by_record = {record.record_id: record.provenance.task_id for record in snapshot.records}
+    edit_classes_by_record = {
+        record.record_id: frozenset(item.value for item in record.action.edit_classes)
+        for record in snapshot.records
+    }
     rows: list[JsonObject] = []
+    uptake_by_arm: dict[str, dict[str, int]] = {}
     by_pair: dict[tuple[str, int], dict[str, Path]] = {}
     for arm, task_id, seed, outcome in outcomes:
         result = parse_json_object(read_text_artifact(outcome.run_directory / "results.json"))
         metrics = result.get("metrics")
         if not isinstance(metrics, dict):
             raise PersistenceError("contextual child results have no metrics")
-        retrievals = sorted((outcome.run_directory / "experience_v3" / "retrieval").glob("*.json"))
+        audits = _retrieval_audit_values(outcome.run_directory)
         shown = 0
         eligible = 0
-        for path in retrievals:
-            audit = parse_json_object(read_text_artifact(path))
+        for audit in audits:
             retrieval = audit.get("retrieval")
             rendered = audit.get("rendered_memory")
             eligible_values = (
@@ -688,6 +973,11 @@ def _analyze_experiment(
                 eligible += len(eligible_values)
             if isinstance(shown_values, list):
                 shown += len(shown_values)
+        ties = _tie_statistics(audits, task_by_record)
+        uptake = _run_uptake(outcome.run_directory, audits, edit_classes_by_record)
+        arm_totals = uptake_by_arm.setdefault(arm, dict.fromkeys(uptake, 0))
+        for key, value in uptake.items():
+            arm_totals[key] += value
         rows.append(
             {
                 "schema_version": CONTEXTUAL_ANALYSIS_SCHEMA,
@@ -702,6 +992,8 @@ def _analyze_experiment(
                 "archive_coverage": metrics["archive_coverage"],
                 "eligible_memory_count_across_retrievals": eligible,
                 "shown_memory_count_across_retrievals": shown,
+                **ties,
+                **uptake,
             }
         )
         by_pair.setdefault((task_id, seed), {})[arm] = outcome.run_directory
@@ -738,6 +1030,9 @@ def _analyze_experiment(
         "prompt_isolation_checked": prompt_isolation_comparisons > 0,
         "prompt_isolation_comparison_count": prompt_isolation_comparisons,
         "prompt_isolation_skipped_no_prompt_count": prompt_isolation_skipped_no_prompt,
+        "uptake_by_arm_descriptive_not_causal": {
+            arm: cast(JsonValue, dict(totals)) for arm, totals in sorted(uptake_by_arm.items())
+        },
         "raw_jsonl_hash": jsonl_hash,
         "raw_csv_hash": csv_hash,
     }
@@ -777,6 +1072,8 @@ def run_contextual_experiment(
             "live contextual experiment requires explicit provider authorization"
         )
     snapshot = ExperienceSnapshot.read(repository_root / registry.snapshot_path)
+    distinctness = preflight_arm_distinctness(registry=registry, snapshot=snapshot)
+    enforce_arm_distinctness(registry=registry, report=distinctness)
     target_ids = tuple(sorted(registry.target_task_ids))
     outcomes: list[tuple[str, str, int, Phase4Outcome]] = []
     for task_index, task_id in enumerate(registry.target_task_ids):
@@ -827,4 +1124,5 @@ def run_contextual_experiment(
         repository_root=repository_root,
         registry=registry,
         outcomes=outcomes,
+        snapshot=snapshot,
     )
