@@ -1,4 +1,5 @@
-/local_instructions/
+/local_instructions/*
+!/local_instructions/run_claude_contextual_v3_full_experiment.txt
 /local_notes/
 /.codex/
 /.venv/
