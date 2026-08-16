@@ -1,0 +1,373 @@
+# Remote handoff: run Claude's full contextual-memory v3 experiment
+
+Execute the full matched live development experiment described below. Do not merely explain the
+commands, stop after planning, or run only the provider-free smoke. Continue through preparation,
+the full provider-backed experiment, provider-disabled replay/audit, and analysis unless one of the
+explicit stop conditions in this handoff occurs.
+
+This is a development comparison on previously consumed development tasks. It is not a fresh
+confirmatory test, and its results must not be described as confirmatory evidence.
+
+## Exact implementation to run
+
+Use the GitHub branch `claude-revision` at this exact commit:
+
+```text
+dd01993d4fe38259aaebb7971737f17063199d2c
+phase 5 - contextual memory v3 repair: projection, selection, preflight, uptake
+```
+
+Do not run the contextual-memory implementation from `main` as the treatment under test. Claude's
+commit adds all of the following opt-in behavior:
+
+* `compact-adaptive-v2` prompt projection;
+* `task-balanced-contrast-v2` record selection;
+* aggregate action/outcome evidence summaries;
+* fail-closed arm-distinctness preflight;
+* retrieval tie and descriptive memory-uptake analysis.
+
+The checked-in `experiments/phase5-contextual-v3-development.pending.yaml` deliberately defaults
+to the old v1 projection and selection behavior. Do not use it unchanged for this experiment. The
+checked-in `experiments/phase5-contextual-v3-repair-smoke.yaml` enables Claude's behavior but uses a
+fake backend and only one task; it is a prerequisite smoke test, not the requested live experiment.
+
+## Experimental question and fixed dataset
+
+Run Claude's repaired implementation on the same source evidence, target tasks, search seeds, model,
+search algorithm, and caps used for the prior contextual-memory v3 development experiment. This is
+an apples-to-apples engineering/development benchmark.
+
+The immutable source memory is the existing contextual experience snapshot extracted from the 20
+Phase 4 condition-C runs (10 source tasks and two search seeds per task):
+
+```text
+path: artifacts/phase5-contextual-v3/development-v1/memory-snapshot.json
+file SHA-256: 5a7e5737fb6c427ed783ee4facd8468c0066ec31ab7838d71c3ca8302ee9a643
+internal snapshot_hash: 2d3cbec0c4ff63c5c144ea054862900851d8f2b7b555c6b4c41724536f08c7f8
+record count: 4,980
+source task count: 10
+source run count: 20
+positive / neutral / regression records: 1,244 / 1,620 / 2,116
+```
+
+If available, also verify:
+
+```text
+path: artifacts/phase5-contextual-v3/development-v1/snapshot-freeze-summary.json
+file SHA-256: 8f34cf16360672bffdff0b30a03a5ccf3ab5108808e38cb4c02f1aa8cd6ad691
+```
+
+Use exactly these six target development tasks:
+
+```text
+7da87d0f3bbc2d760f9280da
+824ae3b59537043c2c9ae8e6
+8bd93d552e99b7fb5ad24390
+912fd0bd8c9db2efa50e62d5
+94882c299777df7ee363c062
+95a132fdeea63ea4ea2c63e6
+```
+
+Use exactly search seeds `55001` and `55002`. This produces 12 matched task-seed pairs.
+
+Run all five frozen arms, in the existing rotated order:
+
+```text
+A-no-memory
+B-positive-rich
+C-contrastive-rich
+D-family-only
+D-rich-context
+```
+
+This is the **full experiment**: 6 tasks x 2 seeds x 5 arms = 60 child runs. Do not reduce the
+number of tasks, seeds, arms, requests, proposals, or oracle evaluations to save time. Do not add
+tasks after observing results. `B-positive-rich` and `D-rich-context` are intentional replication
+arms and should render identical prompts; retain both. The repaired contrastive arm C must render a
+real positive/negative contrast and must differ from B for at least one representative context.
+
+Keep the uniform MAP-Elites scheduler unchanged. Memory may affect only the proposer memory block.
+Do not access the sealed test set and do not update memory from any target-task result.
+
+## Portability prerequisite: ignored artifacts are not in Git
+
+The repository's `/artifacts/` and `/local_state/` directories are ignored. A normal GitHub clone
+will therefore not contain the frozen snapshot, Phase 4 source runs, generated benchmark tasks,
+response cache, or ledgers.
+
+The target benchmark can be regenerated deterministically and without provider access using the
+repository's task-generation command. The frozen memory snapshot cannot be replaced with a newly
+invented or newly trained snapshot. Before doing anything paid:
+
+1. Look for the exact snapshot at the path and SHA-256 above.
+2. If it is absent, look for a user-supplied artifact archive or GitHub release attachment and
+   restore it to that exact path.
+3. If the snapshot is still unavailable but all 20 exact Phase 4 C source-run directories are
+   available at `artifacts/phase4-runs/phase4-primary-pilot-v2`, recreate it provider-free with
+   `contextual-freeze` and verify the internal snapshot hash above.
+4. If neither the verified snapshot nor all exact source runs are available, **stop before all
+   provider calls**. Tell the user that the Git clone is missing the frozen experimental input and
+   ask them to supply it. Do not rerun Phase 4, substitute another snapshot, or proceed with empty
+   memory.
+
+Regenerate the benchmark artifacts provider-free if needed, then verify that all six target task
+IDs load under the `development` split and are disjoint from all ten snapshot source task IDs.
+
+## Initial inspection and provider-free gates
+
+Preserve user changes. Do not reset, clean, rewrite old artifacts, or mutate previous ledgers.
+
+1. Inspect `git status`, remotes, branches, and the recent log.
+2. Fetch `origin/claude-revision`, check out the exact commit above (prefer a dedicated worktree if
+   the current checkout has user changes), and verify `git rev-parse HEAD` exactly.
+3. Read `AGENTS.md` if present, this handoff in full, the Claude commit message/diff, and
+   `local_notes/memory_v3_improvements.md` if that ignored note was supplied. Do not require the
+   local note; the committed code and this handoff are authoritative.
+4. Set up the pinned Python 3.12 environment from `pyproject.toml`. Do not silently upgrade pinned
+   dependencies.
+5. With `OPENAI_API_KEY` and `WMS_ALLOW_LIVE_MODEL` unset, run formatting checks, Ruff, strict mypy,
+   and the complete test suite. At Claude's commit the recorded baseline was 163 passing tests.
+6. Run the existing Claude repair smoke and its dry-run provider-free. Confirm that no provider
+   request occurred.
+
+Useful command forms, adjusted only for the environment's installed launcher, are:
+
+```bash
+unset OPENAI_API_KEY WMS_ALLOW_LIVE_MODEL
+.venv/bin/ruff format --check .
+.venv/bin/ruff check .
+.venv/bin/mypy
+.venv/bin/pytest -q
+.venv/bin/wms tasks generate --config configs/benchmark.yaml
+# Run this freeze command only when all 20 exact Phase 4 C source runs are present.
+.venv/bin/wms phase5 contextual-freeze \
+  --experiment experiments/phase5-contextual-v3-repair-smoke.yaml
+.venv/bin/wms phase5 contextual-dry-run \
+  --experiment experiments/phase5-contextual-v3-repair-smoke.yaml
+.venv/bin/wms phase5 contextual-run \
+  --experiment experiments/phase5-contextual-v3-repair-smoke.yaml
+```
+
+If only the verified development snapshot was restored, do not invoke the repair-smoke freeze
+command, because freezing requires the Phase 4 source runs. Instead, make a temporary provider-free
+copy of the repair-smoke registry that points to the verified snapshot and uses a fresh smoke output
+path. Run its dry-run and fake contextual run. The last smoke command uses the fake backend and must
+remain provider-free. If its output already exists, resume or use a fresh smoke output path without
+deleting historical data.
+
+Stop before paid work if CI, snapshot integrity, split isolation, fake smoke, deterministic replay,
+prompt isolation, or arm distinctness fails. Diagnose and safely correct an implementation or
+experiment-wiring bug where possible, rerun all provider-free gates, and clearly report any code or
+configuration change. Do not weaken a gate to make it pass.
+
+## Freeze a new Claude live registry
+
+Create and freeze a new controlled-development registry rather than editing or overwriting the old
+v1 registry or results. A suitable name is:
+
+```text
+experiments/phase5-contextual-v3-claude-development.pending.yaml
+```
+
+It must use a unique experiment ID, output root, runs root, cache namespace, and experiment ledger,
+for example:
+
+```text
+experiment_id: phase5-contextual-v3-claude-development-v1
+output_root: artifacts/phase5-contextual-v3/claude-development-v1
+runs_root: artifacts/phase5-contextual-v3/claude-development-v1/runs
+cache namespace: phase5-contextual-v3-claude-development-v1
+```
+
+Copy the source tasks, target tasks, seeds, arms, scheduler, model, prompt, retry rules, and search
+caps from the original development registry/base config. Enable these exact Claude memory settings:
+
+```yaml
+memory:
+  minimum_similarity_ppm: 300000
+  max_memory_records: 3
+  max_memory_bytes: 4096
+  max_memory_tokens_conservative: 4096
+  include_diverse_third: false
+  short_horizon_steps: 8
+  prompt_projection: compact-adaptive-v2
+  selection_policy: task-balanced-contrast-v2
+  include_aggregate_summary: true
+  aggregate_max_signatures: 6
+  weights:
+    representation_family: 400
+    behavior_cluster: 150
+    error_pattern: 0
+    score_error_count: 150
+    ast_constructor_histogram: 100
+    structural_motifs: 100
+    plateau: 50
+    search_stage: 50
+  randomized_exposure:
+    enabled: false
+    probability_numerator: 1
+    probability_denominator: 2
+    randomization_seed: 20260815
+```
+
+Keep the exact provider contract unless it is unavailable:
+
+```text
+provider/backend: OpenAI Responses API / openai-responses-sdk-v1
+model snapshot: gpt-5-mini-2025-08-07
+endpoint: v1/responses
+service tier: default
+reasoning effort: low
+max output tokens: 2048
+store: false
+truncation: disabled
+batch size: 4
+proposal item cap per child: 249
+oracle-call cap per child: 256
+```
+
+Never silently substitute a current model for `gpt-5-mini-2025-08-07`. If that exact model snapshot
+is unavailable, stop and ask the user whether to freeze a scientifically new experiment with a new
+model; do not call it an apples-to-apples rerun.
+
+Use a new exact-cache namespace. Do not copy the old contextual v3 response cache into it. Within
+the new experiment, normal content-addressed reuse is allowed and expected: the intentional
+B/D-rich replication should avoid duplicate provider spend. Never assume a cache hit unless the
+recorded request identity and prompt bytes match exactly.
+
+Run a provider-free `contextual-dry-run` on the new live registry. Inspect and preserve its JSON.
+It must report:
+
+* 60 children;
+* 12 task-seed pairs;
+* all five arms in the frozen order;
+* zero new provider calls;
+* `B-positive-rich == D-rich-context` for every representative context;
+* B differs from empty for at least one representative context;
+* C differs from B for at least one representative context;
+* negative records exist in the snapshot.
+
+Also directly inspect representative rendered blocks to verify that C actually includes at least
+one positive and one negative record, fits within 4,096 bytes, records its compact/minimal detail
+level and dropped-record accounting, and contains no evaluator-only or target-task information.
+
+## Cost and live authorization gate
+
+Do not reuse or reconstruct the previously exhausted local Phase 4/v3 ledger. Use a new,
+experiment-specific append-only ledger and a reviewed, versioned price/exposure policy. Preserve the
+published-rate accounting and the user's USD 100 lifetime actual-cash ceiling. Bind the registry,
+policy, provider/model/settings, cache namespace, snapshot, task/seed set, and code commit by hash
+before dispatch.
+
+The prior run suggests approximately 7-10 hours sequentially. The design has 60 child runs. With
+the intentional B/D-rich exact-cache replication, approximately 48 child-equivalents may require
+provider calls, or about 3,024 calls at 63 logical calls per fully used child. This is an estimate,
+not a reason to change the frozen design.
+
+Before live calls, obtain a current user-provided OpenAI project dashboard checkpoint containing:
+
+* total amount billed after credits;
+* observation timestamp and timezone;
+* exact project/scope label.
+
+Reconcile it append-only and present the user with the frozen worst-case published-rate reservation,
+the expected spend, the remaining actual-cash headroom, and the exact command. A full 60-child design
+has a USD 9.00 sum of the existing USD 0.15 per-child fail-closed caps; the experiment policy must
+not allow more than the reviewed reservation. Do not infer that expected cost equals the hard cap.
+
+The user's instruction in the active conversation to read and follow this handoff expresses intent
+to run this full experiment. If that same conversation includes the current dashboard checkpoint
+and explicitly tells you to run, treat it as authorization for **only** this frozen Claude full
+development experiment. Otherwise pause once for the dashboard checkpoint and explicit approval of
+the displayed maximum. Do not run sealed testing, rerun Phase 4, change models, or spend beyond the
+frozen maximum under this authorization.
+
+## Run the complete live experiment
+
+Once all gates and authorization pass, set the two independent live gates and run the new registry:
+
+```bash
+export OPENAI_API_KEY='<available through the normal secret mechanism>'
+export WMS_ALLOW_LIVE_MODEL=1
+.venv/bin/wms phase5 contextual-run \
+  --experiment experiments/phase5-contextual-v3-claude-development.pending.yaml \
+  --allow-live-model
+```
+
+Use credentials only through the environment or configured secret mechanism; never print or persist
+the key. Run sequentially unless the code already proves parallel reservations, cache identity, and
+ledger reconciliation are safe. Send the user concise progress updates at least hourly and at
+meaningful boundaries. The run is resumable: on incidental interruption, inspect recorded state and
+resume only exact hash-matched incomplete children. Never delete a run directory or repeat an
+ambiguous paid request.
+
+Do not stop merely because one arm or task performs poorly. Stop immediately and report before any
+further provider calls if any of these occurs:
+
+* snapshot, registry, model, prompt, search, or budget identity changes;
+* a hidden/sealed field appears in a prompt or retrieval artifact;
+* C collapses to B, B differs from D-rich, or memory exceeds its bound;
+* the provider returns a different model identity or incompatible response contract;
+* a ledger reservation/reconciliation becomes uncertain;
+* the reviewed hard experiment cap or USD 100 actual-cash ceiling would be exceeded;
+* run state cannot prove whether a request was already billed;
+* the exact frozen model becomes unavailable.
+
+## Provider-disabled replay, audit, and analysis
+
+After all 60 children finish, remove live authority before analysis:
+
+```bash
+unset OPENAI_API_KEY WMS_ALLOW_LIVE_MODEL
+```
+
+Replay every completed child using the repository's artifact-only `wms replay` command with the new
+`runs_root`. Provider and live-memory mutation must remain unavailable. Verify manifests, request and
+response hashes, proposal/evaluation histories, contextual runtime/snapshot hashes, retrieval
+audits, prompt isolation, usage, cache records, and ledger reconciliation. If the contextual runner
+lacks a provider-disabled aggregate replay command, use the existing per-child Phase 4 replay and
+then regenerate aggregate analysis strictly from validated artifacts; adding a small no-provider
+aggregate replay command is acceptable if tested.
+
+Require all 12 complete matched task-seed pairs and all five arms for the primary comparison. Do not
+silently discard or impute incomplete children. If a cap legitimately prevents completion, report
+the frozen experiment as incomplete and analyze complete data descriptively without changing the
+sample or cap.
+
+Report at minimum:
+
+* exact solves and exact-solve rate by arm;
+* mean score-trajectory AUC by arm;
+* raw per-task/per-seed outcomes and paired differences against A;
+* the number of complete five-arm matched pairs;
+* provider calls, logical calls, cache hits, tokens, published-rate cost, uncertain cost, and wall
+  time by arm and total;
+* memory exposure counts and retrieval misses by arm;
+* projection/detail levels, selected and dropped records, and byte-bound compliance;
+* top-similarity tie statistics and distinct source-task representation;
+* descriptive shown-memory-to-proposal edit-class uptake, clearly labeled noncausal;
+* confirmation that B and D-rich replicated, and that C was genuinely contrastive;
+* any negative transfer, including family-only underperformance;
+* CI, provider-free replay, prompt-isolation, leakage, and ledger audit results.
+
+Compare the new results to the recorded prior v3 development benchmark only as historical
+development context:
+
+```text
+prior complete five-arm pairs: 9
+A-no-memory:             3/9 exact, mean AUC 0.31597
+B-positive-rich:         5/9 exact, mean AUC 0.37630
+C-contrastive-rich:      5/9 exact, mean AUC 0.37630 (collapsed to B; invalid contrast)
+D-family-only:           2/9 exact, mean AUC 0.21875
+D-rich-context:          5/9 exact, mean AUC 0.37630 (B replicate)
+```
+
+The new experiment is successful evidence for this development cohort only if the recorded outcomes
+support that conclusion. Do not call cross-task memory experimentally successful merely because the
+mechanical gates pass. Distinguish: implementation success, memory exposure/uptake, outcome signal,
+statistical uncertainty, and the need for untouched confirmatory tasks.
+
+Finish by giving the user a concise outcome-first report, exact artifact paths and hashes, the final
+ledger status, whether all 60 children replayed successfully, whether Claude's repair improved on
+the matched control and prior implementation, and a recommendation about proceeding to a fresh
+confirmatory experiment. Do not begin that confirmatory experiment without a new explicit request.
