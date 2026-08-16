@@ -761,8 +761,7 @@ def execute_phase5_experience_induction(
             "result_version": EXPERIENCE_INDUCTION_RESULT_VERSION,
             "source_corpus_hash": corpus.corpus_hash,
             "lessons": [
-                item.identity_value() | {"proposal_id": item.proposal_id}
-                for item in proposals
+                item.identity_value() | {"proposal_id": item.proposal_id} for item in proposals
             ],
             "responses": response_rows,
         },

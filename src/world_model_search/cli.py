@@ -27,6 +27,12 @@ from world_model_search.evaluation.phase4_experiment import (
     phase4_dry_run,
     run_phase4_experiment,
 )
+from world_model_search.evaluation.phase5_contextual import (
+    contextual_experiment_dry_run,
+    freeze_contextual_snapshot,
+    load_contextual_experiment_registry,
+    run_contextual_experiment,
+)
 from world_model_search.evaluation.phase5_experience import prepare_phase5_experience_induction
 from world_model_search.evaluation.phase5_experiment import (
     is_phase5_experiment,
@@ -218,6 +224,25 @@ def _parser() -> argparse.ArgumentParser:
         default=Path("artifacts/phase5-experience-v2/retrospective-training"),
     )
     prepare_experience.add_argument("--lessons-per-family", type=int, default=1)
+    for name, help_text in (
+        ("contextual-freeze", "offline-import Phase 4-C transitions into a frozen v3 snapshot"),
+        ("contextual-dry-run", "validate a frozen contextual-memory experiment without dispatch"),
+    ):
+        contextual = phase5_commands.add_parser(name, help=help_text)
+        contextual.add_argument(
+            "--experiment",
+            type=Path,
+            default=Path("experiments/phase5-contextual-v3-smoke.yaml"),
+        )
+    contextual_run = phase5_commands.add_parser(
+        "contextual-run", help="run the matched A/B/C/D contextual-memory experiment"
+    )
+    contextual_run.add_argument(
+        "--experiment",
+        type=Path,
+        default=Path("experiments/phase5-contextual-v3-smoke.yaml"),
+    )
+    contextual_run.add_argument("--allow-live-model", action="store_true")
     return parser
 
 
@@ -559,6 +584,25 @@ def _dispatch(arguments: argparse.Namespace, repository_root: Path) -> int:
                 repository_root=repository_root,
                 output_root=arguments.output_root,
                 requested_lessons_per_family=arguments.lessons_per_family,
+            )
+        elif arguments.phase5_command == "contextual-freeze":
+            contextual_registry = load_contextual_experiment_registry(arguments.experiment)
+            phase5_outcome = freeze_contextual_snapshot(
+                repository_root=repository_root,
+                registry=contextual_registry,
+            )
+        elif arguments.phase5_command == "contextual-dry-run":
+            contextual_registry = load_contextual_experiment_registry(arguments.experiment)
+            phase5_outcome = contextual_experiment_dry_run(
+                repository_root=repository_root,
+                registry=contextual_registry,
+            )
+        elif arguments.phase5_command == "contextual-run":
+            contextual_registry = load_contextual_experiment_registry(arguments.experiment)
+            phase5_outcome = run_contextual_experiment(
+                repository_root=repository_root,
+                registry=contextual_registry,
+                allow_live_model=arguments.allow_live_model,
             )
         else:
             raise AssertionError("unhandled Phase 5 command")

@@ -29,6 +29,20 @@ from world_model_search.dsl.json_schema import (
     ast_canonical_json,
 )
 from world_model_search.errors import BudgetExhaustedError, ConfigurationError, PersistenceError
+from world_model_search.memory.contextual import (
+    ContextFeatureExtractor,
+    ContextFeatures,
+    ExperienceRecorder,
+    create_experience_record,
+    extract_ast_delta,
+)
+from world_model_search.memory.contextual_artifacts import finalize_experience_artifacts
+from world_model_search.memory.contextual_retrieval import (
+    ContextualExperienceRuntime,
+    ExperienceRetriever,
+    ExperienceStore,
+    MemoryBlockRenderer,
+)
 from world_model_search.memory.experience import (
     ExperienceMemorySnapshot,
     retrieve_experience_for_cell,
@@ -72,6 +86,7 @@ from world_model_search.search.archive import (
     ArchiveDecision,
     MapElitesArchive,
     SingleIncumbent,
+    descriptor,
 )
 from world_model_search.search.phase3 import initialization_candidates
 from world_model_search.search.phase4_types import (
@@ -419,6 +434,7 @@ class Phase4RunEngine:
         experience_snapshot: ExperienceMemorySnapshot | None = None,
         experience_arm_id: str | None = None,
         experience_retrieval_bounds: tuple[int, int, int] = (4, 4096, 4096),
+        contextual_experience_runtime: ContextualExperienceRuntime | None = None,
     ) -> None:
         if (
             config.model is None
@@ -444,6 +460,7 @@ class Phase4RunEngine:
         self.experience_snapshot = experience_snapshot
         self.experience_arm_id = experience_arm_id
         self.experience_retrieval_bounds = experience_retrieval_bounds
+        self.contextual_experience_runtime = contextual_experience_runtime
         if (experience_snapshot is None) != (experience_arm_id is None):
             raise ConfigurationError(
                 "experience snapshot and arm identity must be supplied together"
@@ -453,6 +470,15 @@ class Phase4RunEngine:
             and Phase4Condition(str(config.run.condition_id)) is not Phase4Condition.DIVERSE
         ):
             raise ConfigurationError("experience memory requires the diverse archive condition")
+        if experience_snapshot is not None and contextual_experience_runtime is not None:
+            raise ConfigurationError("v2 and v3 experience memory cannot be enabled together")
+        if contextual_experience_runtime is not None:
+            if Phase4Condition(str(config.run.condition_id)) is not Phase4Condition.DIVERSE:
+                raise ConfigurationError("contextual experience requires the diverse condition")
+            if prepared.task.task_id not in set(
+                contextual_experience_runtime.frozen_target_task_ids
+            ):
+                raise ConfigurationError("current task is absent from frozen v3 targets")
         namespace = config.cache.namespace
         if config.phase4_policy.stage == "locked-test":
             namespace = f"{namespace}-{run_directory.name}"
@@ -618,7 +644,66 @@ class Phase4RunEngine:
                 )
                 role = ProposalRole.EXPLOIT
                 call_index = budget.logical_model_calls
-                if self.experience_snapshot is not None:
+                if parent is not None and parent_result is not None:
+                    parent_context = self._experience_context(
+                        database=database,
+                        parent=parent,
+                        parent_result=parent_result,
+                        selected_cell=selected_cell,
+                        search_step=budget.evaluated_candidates,
+                    )
+                    write_content_artifact(
+                        self.run_directory
+                        / "experience_v3"
+                        / "context"
+                        / f"logical-{call_index:05d}.json",
+                        canonical_json(parent_context.to_value()),
+                    )
+                if self.contextual_experience_runtime is not None:
+                    if parent is None or parent_result is None:
+                        raise PersistenceError("contextual request has no selected parent")
+                    runtime = self.contextual_experience_runtime
+                    store = ExperienceStore(runtime.snapshot)
+                    retrieval_v3 = ExperienceRetriever().retrieve(
+                        store=store,
+                        current_context=parent_context,
+                        current_task_id=self.prepared.task.task_id,
+                        forbidden_task_ids=frozenset(runtime.frozen_target_task_ids),
+                        search_seed=self.config.run.seed,
+                        retrieval_index=call_index,
+                        config=runtime.config,
+                    )
+                    memory_block = MemoryBlockRenderer().render(
+                        decision=retrieval_v3,
+                        store=store,
+                    )
+                    retrieval_audit: JsonObject = {
+                        "retrieval": retrieval_v3.to_value(
+                            actually_shown_record_ids=memory_block.shown_record_ids
+                        ),
+                        "rendered_memory": {
+                            "shown_record_ids": list(memory_block.shown_record_ids),
+                            "byte_count": memory_block.byte_count,
+                            "conservative_token_count": (memory_block.conservative_token_count),
+                            "canonical_block_hash": sha256_text(memory_block.canonical_json_block),
+                        },
+                    }
+                    write_content_artifact(
+                        self.run_directory
+                        / "experience_v3"
+                        / "retrieval"
+                        / f"logical-{call_index:05d}.json",
+                        canonical_json(retrieval_audit),
+                    )
+                    request = self.proposer.build_contextual_experience_request(
+                        task=self.prepared.task.public_view(),
+                        role=role,
+                        batch_size=batch_size,
+                        parent=parent,
+                        feedback=_feedback(parent.candidate_id, parent_result),
+                        memory_block=memory_block,
+                    )
+                elif self.experience_snapshot is not None:
                     if parent is None or parent_result is None or selected_cell is None:
                         raise PersistenceError("experience request has no selected archive cell")
                     retrieval = retrieve_experience_for_cell(
@@ -748,6 +833,11 @@ class Phase4RunEngine:
             config=self.config,
             status=status,
         )
+        finalize_experience_artifacts(
+            run_directory=self.run_directory,
+            database=database,
+            phase4_results=results,
+        )
         analysis_hash = write_phase4_analysis(
             run_directory=self.run_directory,
             database=database,
@@ -842,6 +932,146 @@ class Phase4RunEngine:
             str(database.candidate_result(parent.candidate_id)["result_json"])
         )
         return decision.to_value(), parent, result, coordinate
+
+    def _experience_context(
+        self,
+        *,
+        database: Phase4Database,
+        parent: CandidateSummary,
+        parent_result: OracleResult,
+        selected_cell: ArchiveCoordinate | None,
+        search_step: int,
+    ) -> ContextFeatures:
+        """Compute memory context without participating in scheduler selection."""
+
+        if not isinstance(parent.ast, BitExpr):
+            raise PersistenceError("experience context parent is not a typed AST")
+        rows = {str(row["candidate_id"]): row for row in database.candidates()}
+        current_id = parent.candidate_id
+        current_ast = parent.ast
+        current_errors = parent_result.local_errors
+        lineage_depth = 0
+        plateau_length = 0
+        plateau_open = True
+        recent: list[str] = []
+        seen: set[str] = set()
+        while current_id in rows and current_id not in seen:
+            seen.add(current_id)
+            raw_parents = json.loads(str(rows[current_id]["parent_ids_json"]))
+            if not isinstance(raw_parents, list) or not all(
+                isinstance(item, str) for item in raw_parents
+            ):
+                raise PersistenceError("experience lineage parents are malformed")
+            if not raw_parents:
+                break
+            ancestor_id = raw_parents[0]
+            ancestor_row = rows.get(ancestor_id)
+            if ancestor_row is None:
+                raise PersistenceError("experience lineage parent is missing")
+            ancestor = _candidate_from_row(ancestor_row, self.prepared.limits)
+            if not isinstance(ancestor.ast, BitExpr):
+                raise PersistenceError("experience lineage AST is malformed")
+            lineage_depth += 1
+            if len(recent) < 8:
+                recent.extend(
+                    item.value for item in extract_ast_delta(ancestor.ast, current_ast).edit_classes
+                )
+            ancestor_result = _result_from_json(
+                str(database.candidate_result(ancestor_id)["result_json"])
+            )
+            if plateau_open and ancestor_result.local_errors == current_errors:
+                plateau_length += 1
+            else:
+                plateau_open = False
+            current_id = ancestor_id
+            current_ast = ancestor.ast
+        coordinate = selected_cell or descriptor(
+            parent.ast,
+            parent_result,
+            self.prepared.task.public_view(),
+        )
+        return ContextFeatureExtractor().extract(
+            parent=parent.ast,
+            result=parent_result,
+            task=self.prepared.task.public_view(),
+            coordinate=coordinate,
+            search_step=search_step,
+            lineage_depth=lineage_depth,
+            plateau_length=plateau_length,
+            recent_edit_classes=tuple(recent[:8]),
+        )
+
+    def _record_experience(
+        self,
+        *,
+        database: Phase4Database,
+        evaluation_index: int,
+        request_index: int,
+        item_ordinal: int,
+        parents: tuple[CandidateSummary, ...],
+        candidates: dict[str, Candidate],
+        child: Candidate,
+        child_result: OracleResult,
+        decision: ArchiveDecision,
+        canonical_duplicate: bool,
+        semantic_duplicate: bool,
+    ) -> None:
+        if not parents:
+            return
+        request = database.request(request_index)
+        logical_call_index = int(request["logical_call_index"])
+        context_path = (
+            self.run_directory
+            / "experience_v3"
+            / "context"
+            / f"logical-{logical_call_index:05d}.json"
+        )
+        if not context_path.is_file():
+            parent_result = _result_from_json(
+                str(database.candidate_result(parents[0].candidate_id)["result_json"])
+            )
+            context = self._experience_context(
+                database=database,
+                parent=parents[0],
+                parent_result=parent_result,
+                selected_cell=None,
+                search_step=evaluation_index,
+            )
+            write_content_artifact(context_path, canonical_json(context.to_value()))
+        else:
+            context = ContextFeatures.from_value(
+                parse_json_object(read_text_artifact(context_path))
+            )
+        parent_candidate = candidates[parents[0].candidate_id]
+        parent_result = _result_from_json(
+            str(database.candidate_result(parent_candidate.candidate_id)["result_json"])
+        )
+        record = create_experience_record(
+            task_generator_family=self.prepared.task.internal_family_id,
+            task_split=self.prepared.task.split,
+            run_id=database.state().run_id,
+            search_seed=self.config.run.seed,
+            request_index=request_index,
+            item_ordinal=item_ordinal,
+            evaluation_index=evaluation_index,
+            parent=parent_candidate,
+            parent_result=parent_result,
+            parent_context=context,
+            child=child,
+            child_result=child_result,
+            child_coordinate=decision.coordinate,
+            archive_outcome=decision.outcome,
+            canonical_duplicate=canonical_duplicate,
+            semantic_duplicate=semantic_duplicate,
+            sealed_test=(
+                self.prepared.task.split is SplitLabel.TEST
+                or (
+                    self.config.phase4_policy is not None
+                    and self.config.phase4_policy.stage == "locked-test"
+                )
+            ),
+        )
+        ExperienceRecorder(self.run_directory).write_raw(evaluation_index, record)
 
     def _dispatch_request(
         self,
@@ -1193,6 +1423,19 @@ class Phase4RunEngine:
                     budget=budget,
                 ),
                 audit_timestamp=utc_now(),
+            )
+            self._record_experience(
+                database=database,
+                evaluation_index=state.next_evaluation,
+                request_index=request_index,
+                item_ordinal=item.ordinal,
+                parents=parents,
+                candidates=candidates,
+                child=candidate,
+                child_result=evaluated.result,
+                decision=decision,
+                canonical_duplicate=canonical_duplicate,
+                semantic_duplicate=semantic_duplicate,
             )
             database.append_evaluation(
                 candidate=candidate,
@@ -1940,6 +2183,7 @@ def start_phase4_run(
     experience_snapshot: ExperienceMemorySnapshot | None = None,
     experience_arm_id: str | None = None,
     experience_retrieval_bounds: tuple[int, int, int] = (4, 4096, 4096),
+    contextual_experience_runtime: ContextualExperienceRuntime | None = None,
 ) -> Phase4Outcome:
     from world_model_search.search.loop import validate_run_id
 
@@ -1979,6 +2223,11 @@ def start_phase4_run(
                 "max_tokens": experience_retrieval_bounds[2],
             },
         }
+    if contextual_experience_runtime is not None:
+        manifest["contextual_experience_memory"] = {
+            "runtime": contextual_experience_runtime.to_value(),
+            "runtime_hash": contextual_experience_runtime.runtime_hash,
+        }
     run_directory.mkdir(parents=True, exist_ok=False)
     write_json_exclusive(run_directory / "manifest.json", manifest)
     if config.phase4_budget is None:
@@ -2008,6 +2257,7 @@ def start_phase4_run(
         experience_snapshot=experience_snapshot,
         experience_arm_id=experience_arm_id,
         experience_retrieval_bounds=experience_retrieval_bounds,
+        contextual_experience_runtime=contextual_experience_runtime,
     ).execute(interrupt_after=interrupt_after)
 
 
@@ -2041,6 +2291,7 @@ def resume_phase4_run(
     experience_snapshot: ExperienceMemorySnapshot | None = None,
     experience_arm_id: str | None = None,
     experience_retrieval_bounds: tuple[int, int, int] = (4, 4096, 4096),
+    contextual_experience_runtime: ContextualExperienceRuntime | None = None,
 ) -> Phase4Outcome:
     if manifest.get("manifest_schema_version") != PHASE4_MANIFEST_SCHEMA_VERSION:
         raise PersistenceError("Phase 4 configuration requires manifest schema 5")
@@ -2059,6 +2310,14 @@ def resume_phase4_run(
     else:
         backend = _backend(config, allow_live_model=allow_live_model)
     authority = authority_from_manifest(manifest)
+    contextual_manifest = manifest.get("contextual_experience_memory")
+    if contextual_manifest is not None:
+        if not isinstance(contextual_manifest, dict) or contextual_experience_runtime is None:
+            raise PersistenceError("v3 resume requires the frozen contextual runtime")
+        if contextual_manifest.get("runtime_hash") != contextual_experience_runtime.runtime_hash:
+            raise PersistenceError("v3 resume runtime differs from the manifest")
+    elif contextual_experience_runtime is not None:
+        raise PersistenceError("v3 runtime was not enabled in the original run")
     prepared = prepare_phase4(
         repository_root=repository_root,
         config=config,
@@ -2075,4 +2334,5 @@ def resume_phase4_run(
         experience_snapshot=experience_snapshot,
         experience_arm_id=experience_arm_id,
         experience_retrieval_bounds=experience_retrieval_bounds,
+        contextual_experience_runtime=contextual_experience_runtime,
     ).execute(interrupt_after=interrupt_after)

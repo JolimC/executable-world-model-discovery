@@ -323,15 +323,11 @@ def _promote(
     applied = [pair for pair in pairs if pair["treatment_memory_applied"] is True]
     exposed_tasks = {str(pair["task_id"]) for pair in applied}
     total_exposures = sum(
-        _integer(pair["matching_request_exposure_count"], "matching exposure")
-        for pair in applied
+        _integer(pair["matching_request_exposure_count"], "matching exposure") for pair in applied
     )
-    exact_gains = [
-        _integer(pair["exact_auc_gain_ppm"], "exact AUC gain") for pair in applied
-    ]
+    exact_gains = [_integer(pair["exact_auc_gain_ppm"], "exact AUC gain") for pair in applied]
     local_gains = [
-        _integer(pair["local_accuracy_auc_gain_ppm"], "local AUC gain")
-        for pair in applied
+        _integer(pair["local_accuracy_auc_gain_ppm"], "local AUC gain") for pair in applied
     ]
     exact_mean = sum(exact_gains) // max(1, len(exact_gains))
     local_mean = sum(local_gains) // max(1, len(local_gains))
@@ -438,12 +434,12 @@ def run_deep_validation(*, repository_root: Path) -> JsonObject:
             cast(
                 JsonObject,
                 {
-                "proposal_id": proposal.proposal_id,
-                "family": proposal.archive_representation_family.value,
-                "status": status,
-                "reasons": reasons,
-                "summary": summary,
-                "pairs": pairs,
+                    "proposal_id": proposal.proposal_id,
+                    "family": proposal.archive_representation_family.value,
+                    "status": status,
+                    "reasons": reasons,
+                    "summary": summary,
+                    "pairs": pairs,
                 },
             )
         )

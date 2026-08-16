@@ -1,0 +1,438 @@
+from __future__ import annotations
+
+from dataclasses import replace
+
+from world_model_search.domain.types import (
+    CandidateSummary,
+    OracleFeedback,
+    OracleResponseMode,
+    OracleResult,
+    ProposalRole,
+    PublicDemonstration,
+    PublicTask,
+    PublicWorldSpec,
+    SplitLabel,
+)
+from world_model_search.dsl.ast import And, At, Not
+from world_model_search.memory.contextual import (
+    PENDING_DOWNSTREAM,
+    ContextFeatureExtractor,
+    ContextFeatures,
+    ContextMode,
+    DownstreamOutcome,
+    DownstreamOutcomeAnnotator,
+    EditClass,
+    ExperienceMetadata,
+    ExperienceProvenance,
+    ExperienceRecord,
+    ImmediateOutcome,
+    RetrievalMode,
+    extract_ast_delta,
+)
+from world_model_search.memory.contextual_retrieval import (
+    ContextualMemoryConfig,
+    ExperienceRetriever,
+    ExperienceSnapshot,
+    ExperienceStore,
+    MemoryBlockRenderer,
+    RandomizedExposureConfig,
+    RenderedMemoryBlock,
+)
+from world_model_search.model.contextual_prompts import (
+    assert_contextual_prompt_isolation,
+    inject_contextual_memory,
+)
+from world_model_search.model.prompts import ParentScoreFeedback, render_prompt
+from world_model_search.search.archive import descriptor
+from world_model_search.serialization import canonical_json
+
+
+def _task(task_id: str = "task-current") -> PublicTask:
+    return PublicTask(
+        task_id=task_id,
+        public_world_spec=PublicWorldSpec(
+            "test-world-v1",
+            "binary ring",
+            "binary ring",
+            "typed AST",
+        ),
+        split=SplitLabel.TRAINING,
+        demonstrations=(PublicDemonstration("0101", "1010"),),
+        active_queries_enabled=False,
+        query_budget=0,
+    )
+
+
+def _result(errors: int) -> OracleResult:
+    return OracleResult(
+        type_valid=True,
+        total=True,
+        local_errors=errors,
+        local_cases=8,
+        rollout_pass=errors == 0,
+        exact=errors == 0,
+        ast_bits=12,
+        residual_bits=errors * 2,
+        runtime_ns=1,
+        response=OracleFeedback(OracleResponseMode.SCORE_ONLY),
+    )
+
+
+def _context() -> ContextFeatures:
+    task = _task()
+    ast = At(0)
+    result = _result(2)
+    return ContextFeatureExtractor().extract(
+        parent=ast,
+        result=result,
+        task=task,
+        coordinate=descriptor(ast, result, task),
+        search_step=3,
+        lineage_depth=2,
+        plateau_length=1,
+        recent_edit_classes=(EditClass.ADD_NEGATION.value,),
+    )
+
+
+def _record(child_id: str = "child") -> ExperienceRecord:
+    context = _context()
+    return ExperienceRecord(
+        ExperienceProvenance(
+            "elementary-ca-v1",
+            "task-source",
+            SplitLabel.TRAINING.value,
+            "run-a",
+            7,
+            3,
+            0,
+            "parent",
+            child_id,
+            "lineage",
+            8,
+        ),
+        context,
+        extract_ast_delta(At(0), Not(At(0))),
+        ImmediateOutcome(
+            7, 1, 1, -1, False, False, True, False, "inserted", {}, False, False, None
+        ),
+        PENDING_DOWNSTREAM,
+        ExperienceMetadata(True, False, "prospective"),
+    )
+
+
+def _annotated_record(
+    task_id: str,
+    *,
+    score_delta: int,
+    archive_outcome: str = "inserted",
+    sealed: bool = False,
+) -> ExperienceRecord:
+    record = _record(f"child-{task_id}")
+    return replace(
+        record,
+        provenance=replace(
+            record.provenance,
+            task_id=task_id,
+            child_candidate_id=f"child-{task_id}",
+        ),
+        immediate_outcome=replace(
+            record.immediate_outcome,
+            score_delta=score_delta,
+            error_delta=-score_delta,
+            archive_outcome=archive_outcome,
+            archive_inserted=archive_outcome in {"inserted", "replaced", "reserved"},
+        ),
+        downstream_outcome=DownstreamOutcome(
+            "complete",
+            False,
+            None,
+            7 + max(score_delta, 0),
+            max(score_delta, 0),
+            0,
+            8,
+            max(score_delta, 0),
+            False,
+        ),
+        memory_metadata=ExperienceMetadata(not sealed, sealed, "prospective"),
+    )
+
+
+def _snapshot(*records: ExperienceRecord) -> ExperienceSnapshot:
+    return ExperienceSnapshot(
+        tuple(sorted(record.provenance.task_id for record in records)),
+        records,
+        tuple(f"hash-{index}" for index, _record_value in enumerate(records)),
+    )
+
+
+def test_deterministic_ast_diff_and_multi_label_classification() -> None:
+    first = extract_ast_delta(At(0), And(At(0), Not(At(1))))
+    second = extract_ast_delta(At(0), And(At(0), Not(At(1))))
+    assert first == second
+    assert first.changes
+    assert EditClass.ADD_POSITION_REFERENCE in first.edit_classes
+    assert EditClass.ADD_NEGATION in first.edit_classes
+    assert EditClass.COMPOSE_BOOLEAN_SUBTREES in first.edit_classes
+    assert EditClass.EXPAND_SUBTREE in first.edit_classes
+    assert first.size_delta > 0
+
+
+def test_context_features_are_deterministic_and_public_score_only() -> None:
+    first = _context()
+    second = _context()
+    assert first == second
+    assert first.parent_score == 6
+    assert first.parent_error_count == 2
+    assert first.parent_error_pattern is None
+    assert first.public_probe_behavior
+    assert first.constructor_histogram == {"At": 1}
+
+
+def test_record_round_trip_preserves_identity_and_rejects_sealed_reuse() -> None:
+    record = _record()
+    assert ExperienceRecord.from_value(record.to_value()) == record
+    sealed = replace(
+        record,
+        memory_metadata=ExperienceMetadata(False, True, "prospective"),
+    )
+    assert sealed.memory_metadata.training_eligible is False
+    assert sealed.memory_metadata.sealed_test is True
+
+
+def test_downstream_annotation_is_descriptive_and_deterministic() -> None:
+    record = _record("child")
+    annotated = DownstreamOutcomeAnnotator().annotate(
+        (record,),
+        parent_ids={"grandchild": ("child",), "exact": ("grandchild",)},
+        score_by_candidate={"child": 7, "grandchild": 7, "exact": 8},
+        exact_by_candidate={"child": False, "grandchild": False, "exact": True},
+        evaluation_by_candidate={"child": 8, "grandchild": 10, "exact": 12},
+    )[0]
+    assert annotated.downstream_outcome.annotation_status == "complete"
+    assert annotated.downstream_outcome.eventually_had_exact_descendant
+    assert annotated.downstream_outcome.evaluations_until_exact_descendant == 4
+    assert annotated.downstream_outcome.best_descendant_score == 8
+    assert annotated.downstream_outcome.max_descendant_improvement == 1
+    assert annotated.downstream_outcome.lineage_survival_length == 2
+
+
+def test_downstream_annotation_excludes_lineage_events_before_transition() -> None:
+    record = replace(
+        _record("child"),
+        provenance=replace(_record("child").provenance, sequence_index=12),
+    )
+    annotated = DownstreamOutcomeAnnotator().annotate(
+        (record,),
+        parent_ids={"old-descendant": ("child",), "later": ("old-descendant",)},
+        score_by_candidate={"child": 7, "old-descendant": 7, "later": 8},
+        exact_by_candidate={"child": False, "old-descendant": False, "later": True},
+        evaluation_by_candidate={"child": 8, "old-descendant": 10, "later": 13},
+    )[0]
+    assert annotated.downstream_outcome.eventually_had_exact_descendant is False
+    assert annotated.downstream_outcome.lineage_survival_length == 0
+
+
+def test_retrieval_ranking_and_contrast_selection_are_deterministic() -> None:
+    positive = _annotated_record("source-positive", score_delta=1)
+    negative = _annotated_record("source-negative", score_delta=-1, archive_outcome="rejected")
+    store = ExperienceStore(_snapshot(positive, negative))
+    config = ContextualMemoryConfig(
+        retrieval_mode=RetrievalMode.CONTRASTIVE,
+        minimum_similarity_ppm=0,
+        max_memory_bytes=20_000,
+        max_memory_tokens_conservative=20_000,
+    )
+    arguments = {
+        "store": store,
+        "current_context": _context(),
+        "current_task_id": "target",
+        "forbidden_task_ids": frozenset({"target"}),
+        "search_seed": 17,
+        "retrieval_index": 2,
+        "config": config,
+    }
+    decision = ExperienceRetriever().retrieve(**arguments)
+    assert {item.outcome_class for item in decision.all_eligible_scores} == {
+        "positive",
+        "negative",
+    }
+    assert decision.selected_record_ids == (positive.record_id, negative.record_id)
+    assert all(item.components for item in decision.all_eligible_scores)
+    assert decision == ExperienceRetriever().retrieve(**arguments)
+
+
+def test_family_only_ablation_disables_rich_similarity_components() -> None:
+    record = _annotated_record("source", score_delta=1)
+    decision = ExperienceRetriever().retrieve(
+        store=ExperienceStore(_snapshot(record)),
+        current_context=_context(),
+        current_task_id="target",
+        forbidden_task_ids=frozenset(),
+        search_seed=1,
+        retrieval_index=0,
+        config=ContextualMemoryConfig(
+            context_mode=ContextMode.FAMILY_ONLY,
+            retrieval_mode=RetrievalMode.POSITIVE_ONLY,
+            minimum_similarity_ppm=0,
+        ),
+    )
+    components = decision.all_eligible_scores[0].components
+    assert components["representation_family_match"]["effective_weight"] > 0
+    assert components["structural_motif_similarity"]["effective_weight"] == 0
+
+
+def test_store_excludes_forbidden_tasks_and_snapshot_rejects_sealed_records() -> None:
+    allowed = _annotated_record("allowed", score_delta=1)
+    forbidden = _annotated_record("forbidden", score_delta=1)
+    store = ExperienceStore(_snapshot(allowed, forbidden))
+    assert store.eligible(
+        current_task_id="target",
+        forbidden_task_ids=frozenset({"forbidden"}),
+    ) == (allowed,)
+    sealed = _annotated_record("sealed", score_delta=1, sealed=True)
+    try:
+        _snapshot(sealed)
+    except ValueError as exc:
+        assert "ineligible, sealed" in str(exc)
+    else:
+        raise AssertionError("sealed test experience entered a reusable snapshot")
+
+
+def test_memory_renderer_is_canonical_bounded_and_contains_no_provenance() -> None:
+    positive = _annotated_record("source-positive", score_delta=1)
+    negative = _annotated_record("source-negative", score_delta=-1, archive_outcome="rejected")
+    store = ExperienceStore(_snapshot(positive, negative))
+    config = ContextualMemoryConfig(
+        retrieval_mode=RetrievalMode.CONTRASTIVE,
+        minimum_similarity_ppm=0,
+        max_memory_bytes=20_000,
+        max_memory_tokens_conservative=20_000,
+    )
+    decision = ExperienceRetriever().retrieve(
+        store=store,
+        current_context=_context(),
+        current_task_id="target",
+        forbidden_task_ids=frozenset(),
+        search_seed=1,
+        retrieval_index=0,
+        config=config,
+    )
+    block = MemoryBlockRenderer().render(decision=decision, store=store)
+    assert block.canonical_json_block == canonical_json(block.value)
+    assert block.byte_count <= config.max_memory_bytes
+    assert "task_id" not in block.canonical_json_block
+    assert "run_id" not in block.canonical_json_block
+    assert len(block.shown_record_ids) == 2
+
+
+def test_prompt_budget_drops_whole_records_and_logs_actual_exposure() -> None:
+    record = _annotated_record("source", score_delta=1)
+    store = ExperienceStore(_snapshot(record))
+    config = ContextualMemoryConfig(
+        retrieval_mode=RetrievalMode.POSITIVE_ONLY,
+        minimum_similarity_ppm=0,
+        max_memory_bytes=500,
+        max_memory_tokens_conservative=500,
+    )
+    decision = ExperienceRetriever().retrieve(
+        store=store,
+        current_context=_context(),
+        current_task_id="target",
+        forbidden_task_ids=frozenset(),
+        search_seed=1,
+        retrieval_index=0,
+        config=config,
+    )
+    block = MemoryBlockRenderer().render(decision=decision, store=store)
+    assert block.value["cross_task_experience"] == []
+    assert block.shown_record_ids == ()
+    audit = decision.to_value(actually_shown_record_ids=block.shown_record_ids)
+    assert audit["exposure_decisions"][0]["shown"] is False
+
+
+def test_no_relevant_memory_returns_canonical_empty_block() -> None:
+    record = _annotated_record("source", score_delta=1)
+    store = ExperienceStore(_snapshot(record))
+    decision = ExperienceRetriever().retrieve(
+        store=store,
+        current_context=replace(_context(), representation_family="parity"),
+        current_task_id="target",
+        forbidden_task_ids=frozenset(),
+        search_seed=1,
+        retrieval_index=0,
+        config=ContextualMemoryConfig(
+            context_mode=ContextMode.FAMILY_ONLY,
+            retrieval_mode=RetrievalMode.POSITIVE_ONLY,
+            minimum_similarity_ppm=1,
+        ),
+    )
+    block = MemoryBlockRenderer().render(decision=decision, store=store)
+    assert decision.selected_record_ids == ()
+    assert block.value["cross_task_experience"] == []
+
+
+def test_randomized_exposure_is_reproducible_and_logged() -> None:
+    record = _annotated_record("source", score_delta=1)
+    store = ExperienceStore(_snapshot(record))
+    config = ContextualMemoryConfig(
+        retrieval_mode=RetrievalMode.POSITIVE_ONLY,
+        minimum_similarity_ppm=0,
+        exposure=RandomizedExposureConfig(True, 1, 2, 99),
+    )
+    arguments = {
+        "store": store,
+        "current_context": _context(),
+        "current_task_id": "target",
+        "forbidden_task_ids": frozenset(),
+        "search_seed": 3,
+        "retrieval_index": 4,
+        "config": config,
+    }
+    first = ExperienceRetriever().retrieve(**arguments)
+    second = ExperienceRetriever().retrieve(**arguments)
+    assert first.exposure_decisions == second.exposure_decisions
+    exposure = first.exposure_decisions[0]
+    assert exposure.inclusion_probability_numerator == 1
+    assert exposure.inclusion_probability_denominator == 2
+    assert exposure.randomization_seed == 99
+
+
+def test_memoryless_and_treatment_prompts_differ_only_in_memory_block() -> None:
+    positive = _annotated_record("source", score_delta=1)
+    treatment_store = ExperienceStore(_snapshot(positive))
+    config = ContextualMemoryConfig(
+        retrieval_mode=RetrievalMode.POSITIVE_ONLY,
+        minimum_similarity_ppm=0,
+        max_memory_bytes=20_000,
+        max_memory_tokens_conservative=20_000,
+    )
+
+    def block(store: ExperienceStore, mode: RetrievalMode) -> RenderedMemoryBlock:
+        decision = ExperienceRetriever().retrieve(
+            store=store,
+            current_context=_context(),
+            current_task_id="target",
+            forbidden_task_ids=frozenset(),
+            search_seed=1,
+            retrieval_index=0,
+            config=replace(config, retrieval_mode=mode),
+        )
+        return MemoryBlockRenderer().render(decision=decision, store=store)
+
+    candidate_id = "a" * 64
+    _template, _version, base = render_prompt(
+        task=_task("target"),
+        role=ProposalRole.EXPLOIT,
+        requested_batch_size=1,
+        parent=CandidateSummary(candidate_id, At(0)),
+        feedback=ParentScoreFeedback(candidate_id, True, True, 2, 8, False, 12, 4, 16),
+    )
+    control = inject_contextual_memory(
+        base_prompt=base,
+        memory_block=block(ExperienceStore(None), RetrievalMode.DISABLED),
+    )
+    treatment = inject_contextual_memory(
+        base_prompt=base,
+        memory_block=block(treatment_store, RetrievalMode.POSITIVE_ONLY),
+    )
+    assert_contextual_prompt_isolation(control, treatment)

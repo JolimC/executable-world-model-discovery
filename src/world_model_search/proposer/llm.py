@@ -12,8 +12,13 @@ from world_model_search.domain.types import (
     ProposalRole,
 )
 from world_model_search.dsl.ast import AstLimits, BitExpr
+from world_model_search.memory.contextual_retrieval import RenderedMemoryBlock
 from world_model_search.memory.experience import ExperienceRetrievalRecord
 from world_model_search.model.cache import ExactResponseCache
+from world_model_search.model.contextual_prompts import (
+    CONTEXTUAL_SEARCH_PROMPT_VERSION,
+    inject_contextual_memory,
+)
 from world_model_search.model.phase5_experience_prompts import (
     EXPERIENCE_SEARCH_PROMPT_VERSION,
     inject_experience_memory,
@@ -159,6 +164,47 @@ class LLMProposer:
             service_tier=self.service_tier,
             prompt_template="iterative-experience-memory",
             prompt_version=EXPERIENCE_SEARCH_PROMPT_VERSION,
+            rendered_input=rendered,
+            structured_schema_name=BATCH_SCHEMA_NAME,
+            structured_schema_version=BATCH_SCHEMA_VERSION,
+            structured_schema=candidate_batch_json_schema(role=role, batch_size=batch_size),
+            role=role,
+            requested_batch_size=batch_size,
+            settings=self.settings,
+        )
+
+    def build_contextual_experience_request(
+        self,
+        *,
+        task: object,
+        role: ProposalRole,
+        batch_size: int,
+        parent: CandidateSummary,
+        feedback: ParentScoreFeedback,
+        memory_block: RenderedMemoryBlock,
+    ) -> ModelRequest:
+        """Build an isolated v3 request whose only arm difference is evidence content."""
+
+        from world_model_search.domain.types import PublicTask
+
+        if not isinstance(task, PublicTask):
+            raise TypeError("LLM proposer accepts only PublicTask")
+        _template, _version, base = render_prompt(
+            task=task,
+            role=role,
+            requested_batch_size=batch_size,
+            parent=parent,
+            feedback=feedback,
+        )
+        rendered = inject_contextual_memory(base_prompt=base, memory_block=memory_block)
+        return ModelRequest(
+            backend_id=self.backend.backend_id,
+            provider_id=self.backend.provider_id,
+            resolved_model=self.resolved_model,
+            endpoint=self.endpoint,
+            service_tier=self.service_tier,
+            prompt_template="iterative-contextual-experience-memory",
+            prompt_version=CONTEXTUAL_SEARCH_PROMPT_VERSION,
             rendered_input=rendered,
             structured_schema_name=BATCH_SCHEMA_NAME,
             structured_schema_version=BATCH_SCHEMA_VERSION,
