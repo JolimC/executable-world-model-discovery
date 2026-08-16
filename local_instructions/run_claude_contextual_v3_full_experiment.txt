@@ -10,12 +10,19 @@ confirmatory test, and its results must not be described as confirmatory evidenc
 
 ## Exact implementation to run
 
-Use the GitHub branch `claude-revision` at this exact commit:
+Use the GitHub branch `claude-revision`. The implementation under test is this exact commit:
 
 ```text
 dd01993d4fe38259aaebb7971737f17063199d2c
 phase 5 - contextual memory v3 repair: projection, selection, preflight, uptake
 ```
+
+A later `claude-revision` descendant is acceptable only when its changes after this commit are
+packaging-only (for example this handoff, `.gitignore`, or the immutable frozen snapshot) or are the
+new experiment registry/budget wiring required below. Verify that commit `dd01993...` is an ancestor
+and inspect every later diff. There must be no unreviewed change to Claude's implementation under
+`src/` or its existing tests. Do not check out the parent commit if doing so would remove a packaged
+snapshot from the working tree.
 
 Do not run the contextual-memory implementation from `main` as the treatment under test. Claude's
 commit adds all of the following opt-in behavior:
@@ -118,8 +125,9 @@ IDs load under the `development` split and are disjoint from all ten snapshot so
 Preserve user changes. Do not reset, clean, rewrite old artifacts, or mutate previous ledgers.
 
 1. Inspect `git status`, remotes, branches, and the recent log.
-2. Fetch `origin/claude-revision`, check out the exact commit above (prefer a dedicated worktree if
-   the current checkout has user changes), and verify `git rev-parse HEAD` exactly.
+2. Fetch and check out `origin/claude-revision` (prefer a dedicated worktree if the current checkout
+   has user changes). Verify with `git merge-base --is-ancestor` that the implementation commit above
+   is an ancestor, inspect the complete diff after it, and apply the packaging-only rule above.
 3. Read `AGENTS.md` if present, this handoff in full, the Claude commit message/diff, and
    `local_notes/memory_v3_improvements.md` if that ignored note was supplied. Do not require the
    local note; the committed code and this handoff are authoritative.
